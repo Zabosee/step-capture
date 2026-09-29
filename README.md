@@ -3,21 +3,6 @@
 Zeichnet Mausklicks und Texteingaben auf einem gewählten Monitor auf und erzeugt daraus
 eine Schritt-für-Schritt-Anleitung als Word-Datei (.docx) mit markierten Screenshots.
 
-## Installation (Python 3.9+, Windows empfohlen)
-
-```
-pip install mss pillow pynput python-docx uiautomation
-```
-oder `pip install -r requirements.txt`. Start: `python main.py`
-
-## Als .exe bauen (läuft ohne Python)
-
-```
-pip install pyinstaller
-python -m PyInstaller --noconfirm --onefile --windowed --name ProcessRecorder --collect-all uiautomation main.py
-```
-Ergebnis: `dist\ProcessRecorder.exe` – diese eine Datei weitergeben und per Doppelklick starten.
-
 Hinweise: Die exe ist nicht signiert, Windows SmartScreen fragt beim ersten Start nach
 („Weitere Informationen“ → „Trotzdem ausführen“). Da das Programm Tastatur und Maus mitliest,
 können Virenscanner einen Fehlalarm auslösen.
