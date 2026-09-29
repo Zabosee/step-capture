@@ -227,7 +227,7 @@ class Recorder:
         """Erstellt Screenshots und Schritte (mss-Instanzen sind thread-gebunden)."""
         import mss
 
-        with mss.mss() as sct:
+        with mss.MSS() as sct:
             while True:
                 event = self._queue.get()
                 if event is None:

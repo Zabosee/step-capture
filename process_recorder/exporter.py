@@ -45,7 +45,7 @@ def _prepare_image(step: Step) -> Optional[io.BytesIO]:
         h = round(img.height * MAX_IMAGE_WIDTH_PX / img.width)
         img = img.resize((MAX_IMAGE_WIDTH_PX, h), Image.LANCZOS)
     buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.save(buf, format="JPEG", quality=85)
     buf.seek(0)
     return buf
 

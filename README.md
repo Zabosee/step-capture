@@ -10,6 +10,18 @@ pip install mss pillow pynput python-docx uiautomation
 ```
 oder `pip install -r requirements.txt`. Start: `python main.py`
 
+## Als .exe bauen (läuft ohne Python)
+
+```
+pip install pyinstaller
+python -m PyInstaller --noconfirm --onefile --windowed --name ProcessRecorder --collect-all uiautomation main.py
+```
+Ergebnis: `dist\ProcessRecorder.exe` – diese eine Datei weitergeben und per Doppelklick starten.
+
+Hinweise: Die exe ist nicht signiert, Windows SmartScreen fragt beim ersten Start nach
+(„Weitere Informationen“ → „Trotzdem ausführen“). Da das Programm Tastatur und Maus mitliest,
+können Virenscanner einen Fehlalarm auslösen.
+
 ## Bedienung
 1. Bildschirm wählen, **Start** klicken (Fenster am besten auf einen anderen Monitor schieben).
 2. Ablauf durchführen. Klicks = Schritt mit Screenshot + rotem Kreis; zusammenhängender Text
@@ -26,3 +38,7 @@ verworfen. Im Dokument erscheint ein Hinweis-Schritt; danach läuft die Aufnahme
 - Strg-Kombinationen (z. B. Einfügen mit Strg+V) werden nicht als Text erfasst.
 - Passwortfelder in Browsern werden nur erkannt, wenn diese Barrierefreiheit/UIA bereitstellen.
 - Auf Nicht-Windows-Systemen ist der Schutz inaktiv.
+- Der Screenshot entsteht kurz nach dem Klick; ein dadurch geöffnetes Menü kann bereits sichtbar sein.
+
+---
+Made by Lukas Dostal

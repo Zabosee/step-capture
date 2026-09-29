@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 def list_monitors() -> List[dict]:
     """Einzelne Monitore (ohne den virtuellen Gesamtbildschirm mss.monitors[0])."""
-    with mss.mss() as sct:
+    with mss.MSS() as sct:
         return [dict(m) for m in sct.monitors[1:]]
 
 
@@ -76,6 +76,8 @@ class App(tk.Tk):
             hint += ("\nAchtung: Der Schutz für UAC-/Admin-Fenster und Passwortfelder ist "
                      "nur unter Windows aktiv!")
         ttk.Label(frame, text=hint, foreground="#666", wraplength=380).grid(pady=(8, 0), sticky="w")
+        ttk.Label(frame, text="made by Lukas Dostal", foreground="#999",
+                  font=("Segoe UI", 8)).grid(pady=(10, 0), sticky="e")
 
     def _on_configure(self, _event=None) -> None:
         self._window_rect = (self.winfo_rootx(), self.winfo_rooty(),
