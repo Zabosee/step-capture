@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from .models import Step
+from .redaction import RedactionFinder, redact_image, to_image_rects
 from .security import SensitiveContextDetector
 from .target import TargetResolver
 
@@ -50,10 +51,12 @@ class Recorder:
     """Zeichnet Klicks und Texteingaben eines Monitors als Liste von :class:`Step` auf."""
 
     def __init__(self, monitor: dict, workdir: Path,
-                 ignore_rect: Optional[Callable[[], Optional[Rect]]] = None) -> None:
+                 ignore_rect: Optional[Callable[[], Optional[Rect]]] = None,
+                 redact: bool = True) -> None:
         self._monitor = dict(monitor)
         self._workdir = Path(workdir)
         self._ignore_rect = ignore_rect          # z. B. Fenster des Recorders selbst
+        self.redact = redact                     # sensible Felder in Screenshots schwärzen
 
         self.steps: List[Step] = []              # wird nur vom Worker-Thread beschrieben
         self.error_count = 0
@@ -68,6 +71,7 @@ class Recorder:
         self._poke = threading.Event()
         self._detector = SensitiveContextDetector()
         self._resolver = TargetResolver()
+        self._redactor = RedactionFinder()
         self._threads: List[threading.Thread] = []
         self._listeners: list = []
         self._running = False
@@ -134,6 +138,7 @@ class Recorder:
         self._poke.set()
         self._queue.put(None)                    # beendet den Capture-Worker nach Restarbeit
         self._resolver.close()
+        self._redactor.close()
 
     def finish(self) -> List[Step]:
         """Wartet auf den Capture-Worker und liefert alle Schritte in zeitlicher Reihenfolge."""
@@ -370,8 +375,17 @@ class Recorder:
     def _grab(self, sct) -> Path:
         from PIL import Image
 
+        # Feldsuche (UI Automation, eigener Thread) läuft parallel zur Aufnahme
+        pending = self._redactor.submit() if self.redact else None
         shot = sct.grab(self._monitor)
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        if pending is not None:
+            try:
+                screen_rects = self._redactor.result(pending)
+                if screen_rects:
+                    redact_image(img, to_image_rects(screen_rects, self._monitor, img.size))
+            except Exception:
+                log.exception("Schwärzen fehlgeschlagen – Screenshot bleibt unverändert")
         path = self._workdir / f"step_{len(self.steps):04d}.jpg"
         img.save(path, quality=88)
         return path

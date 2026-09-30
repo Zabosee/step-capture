@@ -209,6 +209,11 @@ class App(tk.Tk):
                        variable=self._zoom, bg=CARD, activebackground=CARD, fg=TEXT,
                        selectcolor=CARD, font=(FONT, 9), anchor="w", bd=0,
                        highlightthickness=0).pack(fill="x", pady=(px(8), 0))
+        self._redact_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(inner, text="Sensible Felder schwärzen (Passwörter, PIN, IBAN …)",
+                       variable=self._redact_var, bg=CARD, fg=TEXT, activebackground=CARD,
+                       activeforeground=TEXT, selectcolor=CARD, font=(FONT, 9),
+                       anchor="w").pack(fill="x", pady=(px(8), 0))
 
         # Buttons
         bw = px(190)
@@ -281,7 +286,8 @@ class App(tk.Tk):
         monitor = self._monitors[self._combo.current()]
         self._workdir = Path(tempfile.mkdtemp(prefix="process_recorder_"))
         try:
-            self._recorder = Recorder(monitor, self._workdir, lambda: self._window_rect)
+            self._recorder = Recorder(monitor, self._workdir, lambda: self._window_rect,
+                                      redact=self._redact_var.get())
             self._recorder.start()
         except Exception as exc:
             log.exception("Start fehlgeschlagen")
