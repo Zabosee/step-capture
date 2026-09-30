@@ -218,16 +218,19 @@ class App(tk.Tk):
     def _stop(self) -> None:
         rec, self._recorder = self._recorder, None
         self._stop_btn.configure(state="disabled")
-        self._status.set("Aufnahme wird beendet …")
+        self._status.set("Aufnahme beendet – bitte Speicherort wählen …")
         self.update_idletasks()
-        steps = rec.stop() if rec else []
+        if rec:
+            rec.begin_stop()                     # sofort: Eingaben nicht mehr erfassen
         label = self._combo.get()
 
-        if not steps:
+        if rec and rec.step_count == 0 and not rec.finish():     # nichts aufgezeichnet
             messagebox.showinfo("Keine Schritte", "Es wurden keine Schritte aufgezeichnet.")
             self._finish("Bereit.")
             return
 
+        # Der Capture-Worker arbeitet ggf. noch Screenshots ab – währenddessen kann schon
+        # der Speicherort gewählt werden.
         default = f"Anleitung_{datetime.now():%Y%m%d_%H%M%S}.docx"
         path = filedialog.asksaveasfilename(
             title="Anleitung speichern", defaultextension=".docx", initialfile=default,
@@ -239,12 +242,15 @@ class App(tk.Tk):
                 return
             path = str(Path.home() / default)
 
-        self._status.set(f"Word-Dokument wird erstellt ({len(steps)} Schritte) …")
+        self._status.set("Word-Dokument wird erstellt …")
         result: dict = {}
 
         def work() -> None:
             try:
-                export_docx(steps, Path(path), label)
+                steps = rec.finish() if rec else []
+                result["count"] = len(steps)
+                if steps:
+                    export_docx(steps, Path(path), label)
             except Exception as exc:
                 log.exception("Export fehlgeschlagen")
                 result["error"] = exc
@@ -255,13 +261,17 @@ class App(tk.Tk):
 
     def _wait_export(self, thread: threading.Thread, result: dict, path: str) -> None:
         if thread.is_alive():
-            self.after(200, self._wait_export, thread, result, path)
+            self.after(100, self._wait_export, thread, result, path)
             return
         if "error" in result:
             messagebox.showerror("Export fehlgeschlagen", str(result["error"]))
             self._finish("Export fehlgeschlagen.")
+        elif not result.get("count"):
+            messagebox.showinfo("Keine Schritte", "Es wurden keine Schritte aufgezeichnet.")
+            self._finish("Bereit.")
         else:
-            messagebox.showinfo("Fertig", f"Anleitung gespeichert:\n{path}")
+            messagebox.showinfo("Fertig", f"Anleitung gespeichert:
+{path}")
             self._finish(f"Gespeichert: {path}")
 
     def _finish(self, message: str) -> None:

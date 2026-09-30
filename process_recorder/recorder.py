@@ -90,10 +90,10 @@ class Recorder:
         for listener in self._listeners:
             listener.start()
 
-    def stop(self) -> List[Step]:
-        """Beendet die Aufnahme und liefert alle Schritte in zeitlicher Reihenfolge."""
+    def begin_stop(self) -> None:
+        """Beendet die Eingabe-Erfassung sofort; Restarbeit läuft im Hintergrund weiter."""
         if not self._running:
-            return list(self.steps)
+            return
         self._running = False
         for listener in self._listeners:
             listener.stop()
@@ -101,9 +101,17 @@ class Recorder:
         self._stop.set()
         self._poke.set()
         self._queue.put(None)                    # beendet den Capture-Worker nach Restarbeit
+
+    def finish(self) -> List[Step]:
+        """Wartet auf den Capture-Worker und liefert alle Schritte in zeitlicher Reihenfolge."""
         for t in self._threads:
             t.join(timeout=30)
         return list(self.steps)
+
+    def stop(self) -> List[Step]:
+        """Beendet die Aufnahme und liefert alle Schritte (blockierend)."""
+        self.begin_stop()
+        return self.finish()
 
     # ------------------------------------------------------- Sensibler Kontext
     def _set_sensitive(self, value: bool) -> None:
