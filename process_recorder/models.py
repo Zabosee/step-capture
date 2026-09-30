@@ -20,6 +20,11 @@ class Step:
     clicks: int = 1                             # 2 = Doppelklick usw.
     text: str = ""
     target: Optional[str] = None                # per UI Automation ermitteltes Klickziel
+    custom: Optional[str] = None                # vom Nutzer überschriebene Beschreibung
+
+    def text_for_export(self) -> str:
+        """Beschreibung für die Anleitung: eigene Fassung, sonst die automatische."""
+        return self.custom or self.description()
 
     def description(self) -> str:
         """Automatisch erzeugte Kurzbeschreibung des Schritts."""

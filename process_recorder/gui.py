@@ -294,19 +294,41 @@ class App(tk.Tk):
         rec, self._recorder = self._recorder, None
         self._stop_btn.configure(state="disabled")
         self._pause_btn.configure(state="disabled")
-        self._status.set("Aufnahme beendet – bitte Speicherort wählen …")
+        self._status.set("Aufnahme beendet – Vorschau wird vorbereitet …")
         self.update_idletasks()
         if rec:
             rec.begin_stop()                     # sofort: Eingaben nicht mehr erfassen
         label = self._combo.get()
+        result: dict = {}
 
-        if rec and rec.step_count == 0 and not rec.finish():     # nichts aufgezeichnet
+        def collect() -> None:                   # wartet auf noch offene Screenshots
+            result["steps"] = rec.finish() if rec else []
+
+        thread = threading.Thread(target=collect, daemon=True)
+        thread.start()
+        self._wait_collect(thread, result, label)
+
+    def _wait_collect(self, thread: threading.Thread, result: dict, label: str) -> None:
+        if thread.is_alive():
+            self.after(50, self._wait_collect, thread, result, label)
+            return
+        steps = result.get("steps") or []
+        if not steps:
             messagebox.showinfo("Keine Schritte", "Es wurden keine Schritte aufgezeichnet.")
             self._finish("Bereit.")
             return
+        self._review(steps, label)
 
-        # Der Capture-Worker arbeitet ggf. noch Screenshots ab – währenddessen kann schon
-        # der Speicherort gewählt werden.
+    def _review(self, steps: list, label: str) -> None:
+        from .editor import StepEditor
+
+        editor = StepEditor(self, steps, self._scale)
+        self.wait_window(editor)
+        if editor.result is None:
+            self._finish("Verworfen.")
+            return
+        steps, title, intro = editor.result
+
         default = f"Anleitung_{datetime.now():%Y%m%d_%H%M%S}.docx"
         path = filedialog.asksaveasfilename(
             title="Anleitung speichern", defaultextension=".docx", initialfile=default,
@@ -323,10 +345,7 @@ class App(tk.Tk):
 
         def work() -> None:
             try:
-                steps = rec.finish() if rec else []
-                result["count"] = len(steps)
-                if steps:
-                    export_docx(steps, Path(path), label)
+                export_docx(steps, Path(path), label, title=title, intro=intro)
             except Exception as exc:
                 log.exception("Export fehlgeschlagen")
                 result["error"] = exc
@@ -342,9 +361,6 @@ class App(tk.Tk):
         if "error" in result:
             messagebox.showerror("Export fehlgeschlagen", str(result["error"]))
             self._finish("Export fehlgeschlagen.")
-        elif not result.get("count"):
-            messagebox.showinfo("Keine Schritte", "Es wurden keine Schritte aufgezeichnet.")
-            self._finish("Bereit.")
         else:
             messagebox.showinfo("Fertig", f"Anleitung gespeichert:\n{path}")
             self._finish(f"Gespeichert: {path}")

@@ -89,7 +89,8 @@ def _add_note_box(doc, label: str, text: str, mono: bool, fill: str) -> None:
             r.font.size = Pt(11)
 
 
-def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "") -> Path:
+def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "",
+                title: str = "", intro: str = "") -> Path:
     """Erzeugt die Word-Anleitung und gibt den Pfad zurück."""
     steps = list(steps)
     doc = Document()
@@ -102,7 +103,10 @@ def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "") ->
     normal.font.name = "Calibri"
     normal.font.size = Pt(11)
 
-    doc.add_heading("Prozessdokumentation", level=0)
+    doc.add_heading(title.strip() or "Prozessdokumentation", level=0)
+    if intro.strip():
+        for line in intro.strip().split("\n"):
+            doc.add_paragraph(line)
     meta = doc.add_paragraph()
     meta.add_run(f"Erstellt am {datetime.now():%d.%m.%Y um %H:%M} Uhr").italic = True
     if monitor_label:
@@ -117,7 +121,7 @@ def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "") ->
     for number, (step, image) in enumerate(zip(steps, images), start=1):
         heading = doc.add_heading(f"Schritt {number}", level=2)
         heading.paragraph_format.keep_with_next = True
-        desc = doc.add_paragraph(f"Schritt {number}: {step.description()}")
+        desc = doc.add_paragraph(f"Schritt {number}: {step.text_for_export()}")
         desc.paragraph_format.keep_with_next = True
 
         if step.kind == "protected":
