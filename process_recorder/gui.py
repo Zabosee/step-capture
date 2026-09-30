@@ -12,12 +12,24 @@ from tkinter import filedialog, messagebox, ttk
 from typing import List, Optional
 
 import mss
+from PIL import ImageTk
 
+from .branding import make_logo
 from .exporter import export_docx
 from .recorder import Recorder
 from .security import IS_WINDOWS
 
 log = logging.getLogger(__name__)
+
+BG = "#F4F5FB"
+CARD = "#FFFFFF"
+TEXT = "#1F2340"
+MUTED = "#6B7086"
+BORDER = "#E3E5F0"
+GREEN, GREEN_H = "#16A34A", "#15803D"
+RED, RED_H = "#EF4444", "#DC2626"
+IDLE, REC, PAUSE = "#9CA3AF", "#EF4444", "#F59E0B"
+FONT = "Segoe UI"
 
 
 def list_monitors() -> List[dict]:
@@ -30,12 +42,65 @@ def monitor_label(index: int, m: dict) -> str:
     return f"Monitor {index}: {m['width']}×{m['height']} (Position {m['left']}, {m['top']})"
 
 
+class RoundButton(tk.Canvas):
+    """Flacher Button mit runden Ecken, Hover-Effekt und Deaktiviert-Zustand."""
+
+    def __init__(self, master, text, color, hover, command, width, height, scale) -> None:
+        super().__init__(master, width=width, height=height, bg=master["bg"],
+                         highlightthickness=0, bd=0, cursor="hand2")
+        self._text, self._color, self._hover, self._command = text, color, hover, command
+        self._bw, self._bh, self._br = width, height, int(12 * scale)
+        self._state = "normal"
+        self._over = False
+        self.bind("<Enter>", lambda _e: self._set_over(True))
+        self.bind("<Leave>", lambda _e: self._set_over(False))
+        self.bind("<ButtonRelease-1>", self._click)
+        self._draw()
+
+    def _set_over(self, value: bool) -> None:
+        self._over = value
+        self._draw()
+
+    def _click(self, event) -> None:
+        if self._state == "normal" and 0 <= event.x <= self._bw and 0 <= event.y <= self._bh:
+            self._command()
+
+    def configure(self, cnf=None, **kw):
+        if "state" in kw:
+            self._state = kw.pop("state")
+            super().configure(cursor="hand2" if self._state == "normal" else "arrow")
+            self._draw()
+        if cnf or kw:
+            return super().configure(cnf, **kw)
+
+    config = configure
+
+    def _draw(self) -> None:
+        self.delete("all")
+        enabled = self._state == "normal"
+        fill = (self._hover if self._over else self._color) if enabled else "#E5E7EB"
+        fg = "white" if enabled else "#9CA3AF"
+        w, h, r = self._bw, self._bh, self._br
+        for x0, y0, x1, y1, start in ((0, 0, 2 * r, 2 * r, 90), (w - 2 * r, 0, w, 2 * r, 0),
+                                       (0, h - 2 * r, 2 * r, h, 180), (w - 2 * r, h - 2 * r, w, h, 270)):
+            self.create_arc(x0, y0, x1, y1, start=start, extent=90, fill=fill, outline=fill)
+        self.create_rectangle(r, 0, w - r, h, fill=fill, outline=fill)
+        self.create_rectangle(0, r, w, h - r, fill=fill, outline=fill)
+        self.create_text(w / 2, h / 2, text=self._text, fill=fg, font=(FONT, 11, "bold"))
+
+
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Process Recorder")
+        self.configure(bg=BG)
         self.resizable(False, False)
         self.attributes("-topmost", True)
+        self._scale = max(1.0, self.winfo_fpixels("1i") / 96)
+
+        self._logo_small = ImageTk.PhotoImage(make_logo(self._px(56)))
+        self._icon = ImageTk.PhotoImage(make_logo(64))
+        self.iconphoto(True, self._icon)
 
         self._monitors = list_monitors()
         self._recorder: Optional[Recorder] = None
@@ -46,38 +111,71 @@ class App(tk.Tk):
         self._build_ui()
         self._tick()
 
+    def _px(self, v: int) -> int:
+        return int(v * self._scale)
+
     # ---------------------------------------------------------------- UI
     def _build_ui(self) -> None:
-        frame = ttk.Frame(self, padding=14)
-        frame.grid()
+        px = self._px
+        root = tk.Frame(self, bg=BG)
+        root.pack(padx=px(22), pady=px(20))
 
-        ttk.Label(frame, text="Zu überwachender Bildschirm:").grid(sticky="w")
+        # Kopf: Logo + Titel
+        head = tk.Frame(root, bg=BG)
+        head.pack(fill="x")
+        tk.Label(head, image=self._logo_small, bg=BG).pack(side="left")
+        titles = tk.Frame(head, bg=BG)
+        titles.pack(side="left", padx=(px(14), 0))
+        tk.Label(titles, text="Process Recorder", bg=BG, fg=TEXT,
+                 font=(FONT, 17, "bold")).pack(anchor="w")
+        tk.Label(titles, text="Klicks & Eingaben automatisch als Anleitung festhalten",
+                 bg=BG, fg=MUTED, font=(FONT, 9)).pack(anchor="w")
+
+        # Karte: Monitor-Auswahl
+        card = tk.Frame(root, bg=CARD, highlightthickness=1, highlightbackground=BORDER)
+        card.pack(fill="x", pady=(px(18), 0))
+        inner = tk.Frame(card, bg=CARD)
+        inner.pack(fill="x", padx=px(16), pady=px(14))
+        tk.Label(inner, text="BILDSCHIRM", bg=CARD, fg=MUTED,
+                 font=(FONT, 8, "bold")).pack(anchor="w")
         labels = [monitor_label(i, m) for i, m in enumerate(self._monitors, start=1)]
-        self._combo = ttk.Combobox(frame, values=labels, state="readonly", width=46)
+        self._combo = ttk.Combobox(inner, values=labels, state="readonly", width=46,
+                                   font=(FONT, 10))
         self._combo.current(0)
-        self._combo.grid(pady=(2, 10), sticky="ew")
+        self._combo.pack(fill="x", pady=(px(6), 0))
 
-        buttons = ttk.Frame(frame)
-        buttons.grid(sticky="ew")
-        self._start_btn = tk.Button(buttons, text="● Start", width=14, height=2,
-                                    bg="#2e9d4f", fg="white", font=("Segoe UI", 11, "bold"),
-                                    command=self._start)
-        self._stop_btn = tk.Button(buttons, text="■ Stopp", width=14, height=2,
-                                   bg="#c62828", fg="white", font=("Segoe UI", 11, "bold"),
-                                   command=self._stop, state="disabled")
-        self._start_btn.pack(side="left", expand=True, padx=(0, 6))
-        self._stop_btn.pack(side="left", expand=True, padx=(6, 0))
+        # Buttons
+        bw = px(190)
+        buttons = tk.Frame(root, bg=BG)
+        buttons.pack(fill="x", pady=(px(16), 0))
+        self._start_btn = RoundButton(buttons, "●  Aufnahme starten", GREEN, GREEN_H,
+                                      self._start, bw, px(46), self._scale)
+        self._stop_btn = RoundButton(buttons, "■  Beenden & speichern", RED, RED_H,
+                                     self._stop, bw, px(46), self._scale)
+        self._start_btn.pack(side="left")
+        self._stop_btn.pack(side="right")
+        self._stop_btn.configure(state="disabled")
 
+        # Statuszeile mit farbigem Punkt
+        status = tk.Frame(root, bg=BG)
+        status.pack(fill="x", pady=(px(16), 0))
+        self._dot = tk.Canvas(status, width=px(12), height=px(12), bg=BG,
+                              highlightthickness=0, bd=0)
+        self._dot_item = self._dot.create_oval(1, 1, px(11), px(11), fill=IDLE, outline=IDLE)
+        self._dot.pack(side="left", anchor="n", pady=(px(4), 0))
         self._status = tk.StringVar(value="Bereit.")
-        ttk.Label(frame, textvariable=self._status, wraplength=380).grid(pady=(12, 0), sticky="w")
+        tk.Label(status, textvariable=self._status, bg=BG, fg=TEXT, font=(FONT, 10),
+                 wraplength=px(390), justify="left").pack(side="left", padx=(px(8), 0))
+
         hint = ("Tipp: Dieses Fenster auf einen anderen Monitor schieben – Klicks darauf werden "
                 "ignoriert, es wäre aber auf Screenshots sichtbar.")
         if not IS_WINDOWS:
             hint += ("\nAchtung: Der Schutz für UAC-/Admin-Fenster und Passwortfelder ist "
                      "nur unter Windows aktiv!")
-        ttk.Label(frame, text=hint, foreground="#666", wraplength=380).grid(pady=(8, 0), sticky="w")
-        ttk.Label(frame, text="made by Lukas Dostal", foreground="#999",
-                  font=("Segoe UI", 8)).grid(pady=(10, 0), sticky="e")
+        tk.Label(root, text=hint, bg=BG, fg=MUTED, font=(FONT, 9), wraplength=px(390),
+                 justify="left").pack(anchor="w", pady=(px(10), 0))
+        tk.Label(root, text="made by Lukas Dostal", bg=BG, fg="#A0A4B8",
+                 font=(FONT, 8)).pack(anchor="e", pady=(px(10), 0))
 
     def _on_configure(self, _event=None) -> None:
         self._window_rect = (self.winfo_rootx(), self.winfo_rooty(),
@@ -85,12 +183,16 @@ class App(tk.Tk):
 
     def _tick(self) -> None:
         rec = self._recorder
+        color = IDLE
         if rec is not None:
             if rec.paused:
-                self._status.set("⏸ Geschützter Bereich erkannt – Aufnahme pausiert "
+                color = PAUSE
+                self._status.set("Geschützter Bereich erkannt – Aufnahme pausiert "
                                  f"({rec.step_count} Schritte bisher).")
             else:
-                self._status.set(f"● Aufnahme läuft … {rec.step_count} Schritte erfasst.")
+                color = REC
+                self._status.set(f"Aufnahme läuft … {rec.step_count} Schritte erfasst.")
+        self._dot.itemconfigure(self._dot_item, fill=color, outline=color)
         self.after(300, self._tick)
 
     # ------------------------------------------------------- Start / Stopp
