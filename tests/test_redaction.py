@@ -96,3 +96,27 @@ def test_finder_timeout_and_error_give_none():
         raise RuntimeError("Zielprogramm kaputt")
     g = RedactionFinder(finder=broken)
     assert g.result(g.submit(), timeout=5) is None
+
+
+def test_finder_coalesces_requests_waiting_behind_a_running_search():
+    import threading
+    started, release, calls = threading.Event(), threading.Event(), []
+
+    def slow(_client):
+        calls.append(1)
+        started.set()
+        release.wait(3)
+        return [(1, 2, 3, 4)]
+
+    f = RedactionFinder(finder=slow)
+    if f._failed:
+        pytest.skip("UI Automation nicht verfügbar")
+    first = f.submit()
+    assert started.wait(3)                    # erste Suche läuft
+    second, third = f.submit(), f.submit()    # beide warten und teilen sich EINE neue Suche
+    assert second is third and second is not first
+    release.set()
+    assert f.result(first, timeout=5) == [(1, 2, 3, 4)]
+    assert f.result(second, timeout=5) == [(1, 2, 3, 4)]
+    assert len(calls) == 2
+    f.close()

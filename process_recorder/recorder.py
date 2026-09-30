@@ -45,6 +45,7 @@ class _Event:
     text: str = ""
     capture: bool = True         # False: kein Screenshot (sensibler Kontext)
     target: Optional[Future] = None   # Klickziel (UI Automation), wird im Hintergrund ermittelt
+    redact: Optional[Future] = None   # Suche nach sensiblen Feldern, gestartet beim Ereignis
 
 
 class Recorder:
@@ -113,6 +114,7 @@ class Recorder:
         self._running = True
         self._stop.clear()
         self._workdir.mkdir(parents=True, exist_ok=True)
+        self._submit_redact()                    # Aufwärmen: erste UIA-Suche ist deutlich langsamer
 
         for target in (self._capture_worker, self._security_loop):
             t = threading.Thread(target=target, daemon=True)
@@ -137,13 +139,14 @@ class Recorder:
         self._stop.set()
         self._poke.set()
         self._queue.put(None)                    # beendet den Capture-Worker nach Restarbeit
-        self._resolver.close()
-        self._redactor.close()
 
     def finish(self) -> List[Step]:
         """Wartet auf den Capture-Worker und liefert alle Schritte in zeitlicher Reihenfolge."""
         for t in self._threads:
             t.join(timeout=30)
+        # Erst jetzt schließen: der Worker braucht beide Dienste, bis die Warteschlange leer ist
+        self._resolver.close()
+        self._redactor.close()
         return list(self.steps)
 
     def stop(self) -> List[Step]:
@@ -255,12 +258,14 @@ class Recorder:
 
             if (ctrl or alt or win) and label:
                 self._flush_text()               # Kürzel beendet die laufende Texteingabe
-                self._queue.put(_Event("key", time.time(), text=self._combo_label(label)))
+                self._queue.put(_Event("key", time.time(), text=self._combo_label(label),
+                                       redact=self._submit_redact()))
             elif name == "tab":
                 self._flush_text()
             elif name in ("enter", "esc", "delete") or (name and name[0] == "f" and name[1:].isdigit()):
                 self._flush_text()
-                self._queue.put(_Event("key", time.time(), text=label))
+                self._queue.put(_Event("key", time.time(), text=label,
+                                       redact=self._submit_redact()))
             elif name == "backspace":
                 with self._lock:
                     if self._buffer:
@@ -289,7 +294,7 @@ class Recorder:
             if self._sensitive:
                 return
         if text.strip():
-            self._queue.put(_Event("text", time.time(), text=text))
+            self._queue.put(_Event("text", time.time(), text=text, redact=self._submit_redact()))
 
     # ------------------------------------------------------------------ Maus
     def _on_click(self, x, y, button, pressed) -> None:
@@ -310,7 +315,8 @@ class Recorder:
             self._flush_text()                    # Text endet mit dem Klick
             self._queue.put(_Event("click", time.time(), x=int(x), y=int(y),
                                    button=getattr(button, "name", "left"),
-                                   target=self._resolver.submit(int(x), int(y))))
+                                   target=self._resolver.submit(int(x), int(y)),
+                                   redact=self._submit_redact()))
         except Exception:
             log.exception("Fehler im Maus-Callback")
 
@@ -354,13 +360,14 @@ class Recorder:
                 last.clicks += 1                  # Doppelklick statt zweitem Schritt
                 last.timestamp = ev.ts
                 return
-            path = self._grab(sct)
+            path = self._grab(sct, ev.redact)
             self.steps.append(Step("click", ev.ts, image_path=path, click_rel=rel,
                                    button=ev.button, target=self._target_text(ev)))
         elif ev.kind == "key":
-            self.steps.append(Step("key", ev.ts, image_path=self._grab(sct), text=ev.text))
+            self.steps.append(Step("key", ev.ts, image_path=self._grab(sct, ev.redact),
+                                   text=ev.text))
         elif ev.kind == "text":
-            path = self._grab(sct) if ev.capture else None
+            path = self._grab(sct, ev.redact) if ev.capture else None
             self.steps.append(Step("text", ev.ts, image_path=path, text=ev.text))
 
     @staticmethod
@@ -372,11 +379,16 @@ class Recorder:
         except Exception:                         # Timeout oder Fehler: Schritt ohne Ziel
             return None
 
-    def _grab(self, sct) -> Path:
+    def _submit_redact(self) -> Optional[Future]:
+        """Startet die Suche nach sensiblen Feldern schon beim Ereignis (nicht erst im Worker)."""
+        return self._redactor.submit() if self.redact else None
+
+    def _grab(self, sct, pending: Optional[Future] = None) -> Path:
         from PIL import Image
 
         # Feldsuche (UI Automation, eigener Thread) läuft parallel zur Aufnahme
-        pending = self._redactor.submit() if self.redact else None
+        if pending is None:
+            pending = self._submit_redact()
         shot = sct.grab(self._monitor)
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
         if pending is not None:

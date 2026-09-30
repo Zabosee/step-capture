@@ -22,6 +22,7 @@ def rec(tmp_path):
     r = Recorder(MONITOR, tmp_path)
     r._detector.is_sensitive_fast = lambda: False          # keine echten Windows-Abfragen
     r._resolver.submit = lambda x, y: None                 # keine UI Automation
+    r._redactor.submit = lambda: None
     return r
 
 
@@ -146,6 +147,7 @@ def test_click_outside_monitor_and_inside_ignore_rect_are_skipped(tmp_path):
     r = Recorder(MONITOR, tmp_path, ignore_rect=lambda: (0, 0, 100, 100))
     r._detector.is_sensitive_fast = lambda: False
     r._resolver.submit = lambda x, y: None
+    r._redactor.submit = lambda: None
     r._on_click(50, 50, SimpleNamespace(name="left"), True)         # Recorder-Fenster
     r._on_click(5000, 50, SimpleNamespace(name="left"), True)       # anderer Monitor
     r._on_click(500, 500, SimpleNamespace(name="left"), False)      # Loslassen
@@ -155,7 +157,7 @@ def test_click_outside_monitor_and_inside_ignore_rect_are_skipped(tmp_path):
 
 
 def test_double_click_is_merged_into_one_step(rec, monkeypatch, tmp_path):
-    monkeypatch.setattr(rec, "_grab", lambda sct: tmp_path / "x.jpg")
+    monkeypatch.setattr(rec, "_grab", lambda sct, pending=None: tmp_path / "x.jpg")
     ev1 = rec_mod._Event("click", 100.0, x=200, y=300, button="left")
     ev2 = rec_mod._Event("click", 100.2, x=203, y=301, button="left")
     ev3 = rec_mod._Event("click", 101.5, x=203, y=301, button="left")   # zu spät: neuer Schritt
@@ -171,7 +173,7 @@ def test_protected_steps_are_merged(rec):
 
 
 def test_key_event_creates_key_step(rec, monkeypatch, tmp_path):
-    monkeypatch.setattr(rec, "_grab", lambda sct: tmp_path / "k.jpg")
+    monkeypatch.setattr(rec, "_grab", lambda sct, pending=None: tmp_path / "k.jpg")
     rec._handle_event(None, rec_mod._Event("key", 1.0, text="Strg+S"))
     assert rec.steps[0].kind == "key" and rec.steps[0].text == "Strg+S"
     assert isinstance(rec.steps[0], Step)
@@ -183,3 +185,17 @@ def test_key_label_mapping():
     assert Recorder._key_label(KeyCode.from_vk(0x41)) == "A"
     assert Recorder._key_label(KeyCode.from_char("é")) == "É"
     assert Recorder._key_label(Key.shift) is None
+
+
+def test_finish_redacts_backlog_before_closing_services(tmp_path, monkeypatch):
+    """Nach dem Stopp müssen noch wartende Schritte geschwärzt werden (Dienste erst in finish schließen)."""
+    r = Recorder(MONITOR, tmp_path)
+    closed = []
+    r._redactor.close = lambda: closed.append("redactor")
+    r._resolver.close = lambda: closed.append("resolver")
+    r._running = True
+    r.begin_stop()
+    assert closed == []                                   # begin_stop schließt nichts
+    r._queue.get_nowait()                                 # Ende-Marker entfernen: kein Worker läuft hier
+    r.finish()
+    assert sorted(closed) == ["redactor", "resolver"]

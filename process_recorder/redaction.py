@@ -137,6 +137,8 @@ class RedactionFinder:
         self._thread: Optional[threading.Thread] = None
         self._failed = not IS_WINDOWS
         self._busy_since: Optional[float] = None
+        self._lock = threading.Lock()
+        self._pending: "Optional[Future]" = None     # wartende, noch nicht gestartete Suche
 
     def submit(self) -> "Future[Optional[List[Rect]]]":
         """Startet die Suche; das Ergebnis ist ``None``, wenn sie nicht möglich war."""
@@ -145,10 +147,16 @@ class RedactionFinder:
         if self._failed or (busy is not None and time.monotonic() - busy > STUCK_SECONDS):
             fut.set_result(None)                  # Zielprogramm hängt: nicht auch noch warten
             return fut
-        if self._thread is None:
-            self._thread = threading.Thread(target=self._loop, daemon=True)
-            self._thread.start()
-        self._queue.put(fut)
+        with self._lock:
+            if self._pending is not None:
+                # Es wartet schon eine noch nicht gestartete Suche; sie beginnt nach diesem
+                # Aufruf und ist damit aktuell genug. So teilen sich Klickserien eine Suche.
+                return self._pending
+            self._pending = fut
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._loop, daemon=True)
+                self._thread.start()
+            self._queue.put(fut)
         return fut
 
     @staticmethod
@@ -157,8 +165,7 @@ class RedactionFinder:
         try:
             return fut.result(timeout=timeout)
         except Exception:                         # Timeout oder Fehler: ohne Schwärzung
-            fut.cancel()
-            return None
+            return None                           # (Future wird ggf. von anderen geteilt)
 
     def close(self) -> None:
         self._queue.put(None)
@@ -181,8 +188,11 @@ class RedactionFinder:
                 if fut is None:
                     self._drain()
                     return
+                with self._lock:
+                    if self._pending is fut:
+                        self._pending = None      # ab jetzt startet eine neue Suche für neue Aufrufer
                 if not fut.set_running_or_notify_cancel():
-                    continue                      # Aufrufer hat schon aufgegeben
+                    continue
                 self._busy_since = time.monotonic()
                 try:
                     fut.set_result(finder(client))
