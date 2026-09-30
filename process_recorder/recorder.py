@@ -25,10 +25,18 @@ DOUBLE_CLICK_DISTANCE = 6
 
 Rect = Tuple[int, int, int, int]  # x, y, Breite, Höhe
 
+# Globale Tastenkürzel der App (Strg+Alt+<Buchstabe>) – werden nie aufgezeichnet
+HOTKEY_TOGGLE = "r"          # Aufnahme starten / beenden
+HOTKEY_PAUSE = "p"           # Aufnahme pausieren / fortsetzen
+
+_SPECIAL_KEYS = {"enter": "Enter", "esc": "Esc", "delete": "Entf", "tab": "Tab",
+                 "home": "Pos1", "end": "Ende", "page_up": "Bild auf", "page_down": "Bild ab",
+                 "insert": "Einfg", "print_screen": "Druck"}
+
 
 @dataclass
 class _Event:
-    kind: str                    # "click" | "text" | "protected"
+    kind: str                    # "click" | "text" | "key" | "protected"
     ts: float
     x: int = 0
     y: int = 0
@@ -55,6 +63,7 @@ class Recorder:
         self._buffer: List[Tuple[float, str]] = []   # (Zeitstempel, Zeichen)
         self._modifiers: set = set()
         self._sensitive = False
+        self._manual_pause = False
         self._stop = threading.Event()
         self._poke = threading.Event()
         self._detector = SensitiveContextDetector()
@@ -66,8 +75,26 @@ class Recorder:
     # ------------------------------------------------------------------ Status
     @property
     def paused(self) -> bool:
-        """True, solange ein geschützter Bereich aktiv ist."""
+        """True, solange ein geschützter Bereich aktiv oder manuell pausiert ist."""
+        return self._sensitive or self._manual_pause
+
+    @property
+    def protected(self) -> bool:
+        """True, solange ein geschützter Bereich (UAC/Passwort) aktiv ist."""
         return self._sensitive
+
+    @property
+    def manual_paused(self) -> bool:
+        return self._manual_pause
+
+    def set_manual_pause(self, value: bool) -> None:
+        """Pausiert/fortsetzt die Aufnahme auf Wunsch des Nutzers."""
+        if value == self._manual_pause:
+            return
+        if value:
+            self._flush_text()                   # bisher getippter Text bleibt erhalten
+        self._manual_pause = value
+        log.info("Aufnahme %s (manuell)", "pausiert" if value else "fortgesetzt")
 
     @property
     def step_count(self) -> int:
@@ -159,13 +186,56 @@ class Recorder:
                 self._poke.clear()
 
     # -------------------------------------------------------------- Tastatur
-    def _on_key_press(self, key) -> None:
-        from pynput.keyboard import Key
+    _MODIFIER_NAMES = {"ctrl", "ctrl_l", "ctrl_r", "alt", "alt_l", "alt_r", "alt_gr",
+                       "cmd", "cmd_l", "cmd_r", "shift", "shift_l", "shift_r"}
 
+    def _held(self, *names: str) -> bool:
+        return any(n in self._modifiers for n in names)
+
+    @staticmethod
+    def _key_label(key) -> Optional[str]:
+        """Lesbarer Name der gedrückten (Nicht-Modifikator-)Taste, z. B. „S“, „F5“, „Enter“."""
+        name = getattr(key, "name", None)
+        if name:
+            if name in _SPECIAL_KEYS:
+                return _SPECIAL_KEYS[name]
+            if name.startswith("f") and name[1:].isdigit():
+                return name.upper()
+            return None
+        vk = getattr(key, "vk", None)
+        if vk is not None and (0x30 <= vk <= 0x39 or 0x41 <= vk <= 0x5A):
+            return chr(vk)                       # Strg+<Buchstabe> liefert sonst Steuerzeichen
+        char = getattr(key, "char", None)
+        return char.upper() if char and char.isprintable() else None
+
+    def _combo_label(self, key_label: str) -> str:
+        mods = []
+        if self._held("ctrl", "ctrl_l", "ctrl_r") and not self._held("alt_gr"):
+            mods.append("Strg")
+        if self._held("alt", "alt_l"):
+            mods.append("Alt")
+        if self._held("shift", "shift_l", "shift_r"):
+            mods.append("Umschalt")
+        if self._held("cmd", "cmd_l", "cmd_r"):
+            mods.append("Win")
+        return "+".join(mods + [key_label])
+
+    def _is_app_hotkey(self, key) -> bool:
+        """Strg+Alt+R / Strg+Alt+P gehören der App und werden nicht mitgeschnitten."""
+        if not (self._held("ctrl", "ctrl_l", "ctrl_r") and self._held("alt", "alt_l", "alt_gr")):
+            return False
+        label = self._key_label(key)
+        return bool(label) and label.lower() in (HOTKEY_TOGGLE, HOTKEY_PAUSE)
+
+    def _on_key_press(self, key) -> None:
         try:
-            if key in (Key.ctrl, Key.ctrl_l, Key.ctrl_r, Key.alt_gr, Key.cmd,
-                       getattr(Key, "cmd_l", None), getattr(Key, "cmd_r", None)):
-                self._modifiers.add(key)
+            name = getattr(key, "name", None)
+            if name in self._MODIFIER_NAMES:
+                self._modifiers.add(name)
+                return
+            if self._is_app_hotkey(key):
+                return
+            if self._manual_pause:
                 return
             # Synchrone Schnellprüfung, damit zwischen zwei Poll-Takten nichts durchrutscht
             if not self._sensitive and self._detector.is_sensitive_fast():
@@ -173,26 +243,34 @@ class Recorder:
             if self._sensitive:
                 return
 
-            if key in (Key.tab, Key.enter):
+            label = self._key_label(key)
+            ctrl = self._held("ctrl", "ctrl_l", "ctrl_r") and not self._held("alt_gr")
+            alt = self._held("alt", "alt_l")
+            win = self._held("cmd", "cmd_l", "cmd_r")
+
+            if (ctrl or alt or win) and label:
+                self._flush_text()               # Kürzel beendet die laufende Texteingabe
+                self._queue.put(_Event("key", time.time(), text=self._combo_label(label)))
+            elif name == "tab":
                 self._flush_text()
-            elif key == Key.backspace:
+            elif name in ("enter", "esc", "delete") or (name and name[0] == "f" and name[1:].isdigit()):
+                self._flush_text()
+                self._queue.put(_Event("key", time.time(), text=label))
+            elif name == "backspace":
                 with self._lock:
                     if self._buffer:
                         self._buffer.pop()
-            elif key == Key.space:
+            elif name == "space":
                 self._append(" ")
             else:
                 char = getattr(key, "char", None)
-                # Tastenkombinationen (Strg+C usw.) sind keine Texteingabe; AltGr (@, €) schon
-                shortcut = any(m in self._modifiers for m in
-                               (Key.ctrl, Key.ctrl_l, Key.ctrl_r)) and Key.alt_gr not in self._modifiers
-                if char and char.isprintable() and not shortcut:
+                if char and char.isprintable() and not ctrl:     # AltGr (@, €) ist Text
                     self._append(char)
         except Exception:
             log.exception("Fehler im Tastatur-Callback")
 
     def _on_key_release(self, key) -> None:
-        self._modifiers.discard(key)
+        self._modifiers.discard(getattr(key, "name", None))
 
     def _append(self, char: str) -> None:
         with self._lock:
@@ -218,7 +296,7 @@ class Recorder:
             if not self._sensitive and self._detector.is_sensitive_fast():
                 self._set_sensitive(True)
             self._poke.set()
-            if self._sensitive:
+            if self._sensitive or self._manual_pause:
                 return
             m = self._monitor
             if not (m["left"] <= x < m["left"] + m["width"]
@@ -274,6 +352,8 @@ class Recorder:
             path = self._grab(sct)
             self.steps.append(Step("click", ev.ts, image_path=path, click_rel=rel,
                                    button=ev.button, target=self._target_text(ev)))
+        elif ev.kind == "key":
+            self.steps.append(Step("key", ev.ts, image_path=self._grab(sct), text=ev.text))
         elif ev.kind == "text":
             path = self._grab(sct) if ev.capture else None
             self.steps.append(Step("text", ev.ts, image_path=path, text=ev.text))

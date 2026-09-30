@@ -131,7 +131,7 @@ def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "") ->
             pic_par.paragraph_format.keep_with_next = step.kind == "text"
             pic_par.add_run().add_picture(image, width=Cm(IMAGE_WIDTH_CM))
 
-        if step.text:
+        if step.kind == "text" and step.text:
             _add_note_box(doc, "Eingegebener Text zum Kopieren:", step.text,
                           mono=True, fill="F2F2F2")
         doc.add_paragraph()

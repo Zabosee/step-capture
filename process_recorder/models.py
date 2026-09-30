@@ -12,7 +12,7 @@ BUTTON_NAMES = {"left": "Linksklick", "right": "Rechtsklick", "middle": "Mittelk
 class Step:
     """Ein Schritt der Anleitung: Klick, Texteingabe oder geschützter Bereich."""
 
-    kind: str  # "click" | "text" | "protected"
+    kind: str  # "click" | "text" | "key" | "protected"
     timestamp: float
     image_path: Optional[Path] = None          # Screenshot (JPEG im Temp-Ordner)
     click_rel: Optional[Tuple[int, int]] = None  # Klick relativ zum Monitor
@@ -36,6 +36,9 @@ class Step:
             return f"{name} bei Koordinate ({x}, {y})"
         if self.kind == "text":
             return "Texteingabe"
+        if self.kind == "key":
+            return (f"Tastenkombination {self.text}" if "+" in self.text
+                    else f"Taste {self.text}")
         return (
             "Geschützter Bereich (Administrator-Bestätigung / Passworteingabe): "
             "Die Aufnahme war pausiert, es wurden weder Eingaben noch Screenshots gespeichert."

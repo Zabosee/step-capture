@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import shutil
 import tempfile
 import threading
@@ -17,7 +18,7 @@ from PIL import ImageTk
 from . import __version__
 from .branding import make_logo
 from .exporter import export_docx
-from .recorder import Recorder
+from .recorder import HOTKEY_PAUSE, HOTKEY_TOGGLE, Recorder
 from .security import IS_WINDOWS
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ BORDER = "#E3E5F0"
 GREEN, GREEN_H = "#16A34A", "#15803D"
 RED, RED_H = "#EF4444", "#DC2626"
 IDLE, REC, PAUSE = "#9CA3AF", "#EF4444", "#F59E0B"
+AMBER, AMBER_H = "#F59E0B", "#D97706"
 FONT = "Segoe UI"
 
 
@@ -56,6 +58,10 @@ class RoundButton(tk.Canvas):
         self.bind("<Enter>", lambda _e: self._set_over(True))
         self.bind("<Leave>", lambda _e: self._set_over(False))
         self.bind("<ButtonRelease-1>", self._click)
+        self._draw()
+
+    def set_text(self, text: str) -> None:
+        self._text = text
         self._draw()
 
     def _set_over(self, value: bool) -> None:
@@ -109,8 +115,62 @@ class App(tk.Tk):
         self._window_rect = None            # wird bei <Configure> aktualisiert (thread-sicher lesbar)
         self.bind("<Configure>", self._on_configure)
 
+        self._hotkey_queue: "queue.Queue[str]" = queue.Queue()
+        self._hotkeys = None
         self._build_ui()
+        self._start_hotkeys()
         self._tick()
+
+    def _start_hotkeys(self) -> None:
+        """Globale Kürzel Strg+Alt+R (Start/Ende) und Strg+Alt+P (Pause/Fortsetzen).
+
+        Eigene Auswertung statt pynput.GlobalHotKeys: Letztere erkennt Strg+Alt+<Buchstabe>
+        unter Windows nicht zuverlässig (Taste kommt ohne Zeichen an, nur mit Tastencode).
+        """
+        try:
+            from pynput import keyboard
+            held: set = set()
+            codes = {ord(HOTKEY_TOGGLE.upper()): "toggle", ord(HOTKEY_PAUSE.upper()): "pause"}
+
+            def on_press(key) -> None:
+                name = getattr(key, "name", None)
+                if name:
+                    held.add(name)
+                    return
+                if (codes.get(getattr(key, "vk", None))
+                        and held & {"ctrl", "ctrl_l", "ctrl_r"}
+                        and held & {"alt", "alt_l", "alt_r", "alt_gr"}):
+                    self._hotkey_queue.put(codes[key.vk])
+
+            def on_release(key) -> None:
+                held.discard(getattr(key, "name", None))
+
+            self._hotkeys = keyboard.Listener(on_press=on_press, on_release=on_release)
+            self._hotkeys.start()
+        except Exception:
+            log.exception("Globale Tastenkürzel nicht verfügbar")
+
+    def _handle_hotkeys(self) -> None:
+        """Läuft im Tk-Thread (die Listener-Threads legen nur Anfragen in die Queue)."""
+        while True:
+            try:
+                action = self._hotkey_queue.get_nowait()
+            except queue.Empty:
+                return
+            if action == "toggle":
+                if self._recorder is not None:
+                    self._stop()
+                elif str(self._start_btn._state) == "normal":
+                    self._start()
+            elif action == "pause" and self._recorder is not None:
+                self._toggle_pause()
+
+    def _toggle_pause(self) -> None:
+        rec = self._recorder
+        if rec is None:
+            return
+        rec.set_manual_pause(not rec.manual_paused)
+        self._pause_btn.set_text("►  Fortsetzen" if rec.manual_paused else "‖  Pause")
 
     def _px(self, v: int) -> int:
         return int(v * self._scale)
@@ -157,6 +217,11 @@ class App(tk.Tk):
         self._stop_btn.pack(side="right")
         self._stop_btn.configure(state="disabled")
 
+        self._pause_btn = RoundButton(root, "‖  Pause", AMBER, AMBER_H, self._toggle_pause,
+                                      2 * bw + px(0), px(38), self._scale)
+        self._pause_btn.pack(pady=(px(10), 0), anchor="w")
+        self._pause_btn.configure(state="disabled")
+
         # Statuszeile mit farbigem Punkt
         status = tk.Frame(root, bg=BG)
         status.pack(fill="x", pady=(px(16), 0))
@@ -168,7 +233,9 @@ class App(tk.Tk):
         tk.Label(status, textvariable=self._status, bg=BG, fg=TEXT, font=(FONT, 10),
                  wraplength=px(390), justify="left").pack(side="left", padx=(px(8), 0))
 
-        hint = ("Tipp: Dieses Fenster auf einen anderen Monitor schieben – Klicks darauf werden "
+        hint = (f"Tastenkürzel: Strg+Alt+{HOTKEY_TOGGLE.upper()} Start/Ende, "
+                f"Strg+Alt+{HOTKEY_PAUSE.upper()} Pause/Fortsetzen.\n"
+                "Tipp: Dieses Fenster auf einen anderen Monitor schieben – Klicks darauf werden "
                 "ignoriert, es wäre aber auf Screenshots sichtbar.")
         if not IS_WINDOWS:
             hint += ("\nAchtung: Der Schutz für UAC-/Admin-Fenster und Passwortfelder ist "
@@ -186,7 +253,11 @@ class App(tk.Tk):
         rec = self._recorder
         color = IDLE
         if rec is not None:
-            if rec.paused:
+            if rec.manual_paused:
+                color = PAUSE
+                self._status.set(f"Pausiert ({rec.step_count} Schritte bisher) – "
+                                 f"Strg+Alt+{HOTKEY_PAUSE.upper()} zum Fortsetzen.")
+            elif rec.protected:
                 color = PAUSE
                 self._status.set("Geschützter Bereich erkannt – Aufnahme pausiert "
                                  f"({rec.step_count} Schritte bisher).")
@@ -194,7 +265,8 @@ class App(tk.Tk):
                 color = REC
                 self._status.set(f"Aufnahme läuft … {rec.step_count} Schritte erfasst.")
         self._dot.itemconfigure(self._dot_item, fill=color, outline=color)
-        self.after(300, self._tick)
+        self._handle_hotkeys()
+        self.after(150, self._tick)
 
     # ------------------------------------------------------- Start / Stopp
     def _start(self) -> None:
@@ -215,10 +287,13 @@ class App(tk.Tk):
         self._combo.configure(state="disabled")
         self._start_btn.configure(state="disabled")
         self._stop_btn.configure(state="normal")
+        self._pause_btn.set_text("‖  Pause")
+        self._pause_btn.configure(state="normal")
 
     def _stop(self) -> None:
         rec, self._recorder = self._recorder, None
         self._stop_btn.configure(state="disabled")
+        self._pause_btn.configure(state="disabled")
         self._status.set("Aufnahme beendet – bitte Speicherort wählen …")
         self.update_idletasks()
         if rec:
@@ -286,6 +361,8 @@ class App(tk.Tk):
             self._workdir = None
 
     def destroy(self) -> None:
+        if self._hotkeys:
+            self._hotkeys.stop()
         if self._recorder:
             self._recorder.stop()
             self._recorder = None
