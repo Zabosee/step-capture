@@ -134,6 +134,7 @@ class SensitiveContextDetector:
         self._own_pid = os.getpid()
         self._uia = None
         self._uia_failed = False
+        self.reason = ""             # Auslöser der letzten Erkennung (für das Log)
 
     # -- schnelle Prüfung (darf in Eingabe-Callbacks laufen) ------------------
     def is_sensitive_fast(self) -> bool:
@@ -141,13 +142,16 @@ class SensitiveContextDetector:
             return False
         try:
             if _secure_desktop_active():
+                self.reason = "sicherer Desktop (UAC)"
                 return True
             hwnd = user32.GetForegroundWindow()
             if not hwnd:
                 return False
             if _class_name(hwnd).lower() in SENSITIVE_CLASSES:
+                self.reason = f"Fensterklasse {_class_name(hwnd)!r}"
                 return True
             if _window_text(hwnd).strip().lower() in SENSITIVE_TITLES:
+                self.reason = f"Fenstertitel {_window_text(hwnd)!r}"
                 return True
 
             pid = wintypes.DWORD()
@@ -155,6 +159,7 @@ class SensitiveContextDetector:
             if pid.value and pid.value != self._own_pid:
                 name, _elevated = _process_info(pid.value)
                 if name in SENSITIVE_PROCESSES:
+                    self.reason = f"Prozess {name}"
                     return True
                 # Bewusst KEINE Pause für Admin-Fenster an sich: nach der UAC-Bestätigung
                 # läuft z. B. ein Installer mit Adminrechten und soll aufgezeichnet werden.
@@ -165,9 +170,11 @@ class SensitiveContextDetector:
             if user32.GetGUIThreadInfo(tid, ctypes.byref(info)) and info.hwndFocus:
                 if _class_name(info.hwndFocus).lower() == "edit":
                     if user32.GetWindowLongW(info.hwndFocus, _GWL_STYLE) & _ES_PASSWORD:
+                        self.reason = "Passwortfeld (ES_PASSWORD)"
                         return True
         except Exception:  # im Zweifel lieber schützen als mitschneiden
             log.exception("Sicherheitsprüfung (schnell) fehlgeschlagen")
+            self.reason = "Fehler in der Prüfung (fail-safe)"
             return True
         return False
 
@@ -175,7 +182,10 @@ class SensitiveContextDetector:
     def is_sensitive(self) -> bool:
         if self.is_sensitive_fast():
             return True
-        return self._uia_password_focused()
+        if self._uia_password_focused():
+            self.reason = "Passwortfeld (UI Automation)"
+            return True
+        return False
 
     def _uia_password_focused(self) -> bool:
         if not IS_WINDOWS or self._uia_failed:
