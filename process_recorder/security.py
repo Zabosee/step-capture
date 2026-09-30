@@ -6,10 +6,8 @@ Erkennungsebenen:
   1. Sicherer Desktop (klassische UAC-Abfrage): ``OpenInputDesktop`` schlägt fehl.
   2. Vordergrundfenster gehört zu consent.exe / credwiz.exe / LogonUI.exe usw.
      oder hat eine bekannte Fensterklasse / den Titel "Benutzerkontensteuerung".
-  3. Vordergrundprozess läuft mit höheren Rechten als dieses Programm (Admin-Fenster)
-     bzw. lässt sich nicht abfragen (Zugriff verweigert -> höhere Rechte).
-  4. Fokussiertes Win32-Edit-Feld mit ES_PASSWORD-Stil (schnell, synchron).
-  5. UI Automation (``IsPassword``) für Browser, WPF, UWP usw. (langsamer, nur im Poll-Thread).
+  3. Fokussiertes Win32-Edit-Feld mit ES_PASSWORD-Stil (schnell, synchron).
+  4. UI Automation (``IsPassword``) für Browser, WPF, UWP usw. (langsamer, nur im Poll-Thread).
 """
 from __future__ import annotations
 
@@ -134,11 +132,9 @@ class SensitiveContextDetector:
 
     def __init__(self) -> None:
         self._own_pid = os.getpid()
-        self._own_elevated = False
         self._uia = None
         self._uia_failed = False
-        if IS_WINDOWS:
-            self._own_elevated = bool(_token_elevated(kernel32.GetCurrentProcess()))
+        self.reason = ""             # Auslöser der letzten Erkennung (für das Log)
 
     # -- schnelle Prüfung (darf in Eingabe-Callbacks laufen) ------------------
     def is_sensitive_fast(self) -> bool:
@@ -146,33 +142,39 @@ class SensitiveContextDetector:
             return False
         try:
             if _secure_desktop_active():
+                self.reason = "sicherer Desktop (UAC)"
                 return True
             hwnd = user32.GetForegroundWindow()
             if not hwnd:
                 return False
             if _class_name(hwnd).lower() in SENSITIVE_CLASSES:
+                self.reason = f"Fensterklasse {_class_name(hwnd)!r}"
                 return True
             if _window_text(hwnd).strip().lower() in SENSITIVE_TITLES:
+                self.reason = f"Fenstertitel {_window_text(hwnd)!r}"
                 return True
 
             pid = wintypes.DWORD()
             tid = user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value and pid.value != self._own_pid:
-                name, elevated = _process_info(pid.value)
+                name, _elevated = _process_info(pid.value)
                 if name in SENSITIVE_PROCESSES:
+                    self.reason = f"Prozess {name}"
                     return True
-                # Höher privilegiertes Fenster (Admin) bzw. Zugriff verweigert
-                if not self._own_elevated and (elevated is None or elevated):
-                    return True
+                # Bewusst KEINE Pause für Admin-Fenster an sich: nach der UAC-Bestätigung
+                # läuft z. B. ein Installer mit Adminrechten und soll aufgezeichnet werden.
+                # Geschützt bleiben UAC/Anmeldedialoge und Passwortfelder.
 
             info = _GUITHREADINFO()
             info.cbSize = ctypes.sizeof(info)
             if user32.GetGUIThreadInfo(tid, ctypes.byref(info)) and info.hwndFocus:
                 if _class_name(info.hwndFocus).lower() == "edit":
                     if user32.GetWindowLongW(info.hwndFocus, _GWL_STYLE) & _ES_PASSWORD:
+                        self.reason = "Passwortfeld (ES_PASSWORD)"
                         return True
         except Exception:  # im Zweifel lieber schützen als mitschneiden
             log.exception("Sicherheitsprüfung (schnell) fehlgeschlagen")
+            self.reason = "Fehler in der Prüfung (fail-safe)"
             return True
         return False
 
@@ -180,7 +182,10 @@ class SensitiveContextDetector:
     def is_sensitive(self) -> bool:
         if self.is_sensitive_fast():
             return True
-        return self._uia_password_focused()
+        if self._uia_password_focused():
+            self.reason = "Passwortfeld (UI Automation)"
+            return True
+        return False
 
     def _uia_password_focused(self) -> bool:
         if not IS_WINDOWS or self._uia_failed:

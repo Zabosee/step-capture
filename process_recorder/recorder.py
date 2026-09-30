@@ -115,7 +115,8 @@ class Recorder:
             if not value:
                 log.info("Geschützter Bereich verlassen – Aufnahme läuft weiter")
                 return
-            log.info("Geschützter Bereich erkannt – Aufnahme pausiert")
+            log.info("Geschützter Bereich erkannt – Aufnahme pausiert (Grund: %s)",
+                     self._detector.reason)
             # Zeichen, die kurz vor der Erkennung getippt wurden, könnten schon
             # zum Passwort gehören -> verwerfen. Älterer Text bleibt erhalten.
             cutoff = time.time() - GRACE_SECONDS
