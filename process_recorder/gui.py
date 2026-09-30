@@ -17,7 +17,7 @@ from PIL import ImageTk
 
 from . import __version__
 from .branding import make_logo
-from .exporter import export_docx
+from .exporter import export_document
 from .recorder import HOTKEY_PAUSE, HOTKEY_TOGGLE, Recorder
 from .security import IS_WINDOWS
 
@@ -204,6 +204,11 @@ class App(tk.Tk):
                                    font=(FONT, 10))
         self._combo.current(0)
         self._combo.pack(fill="x", pady=(px(6), 0))
+        self._zoom = tk.BooleanVar(value=True)
+        tk.Checkbutton(inner, text="Vergrößerten Ausschnitt um jeden Klick einfügen",
+                       variable=self._zoom, bg=CARD, activebackground=CARD, fg=TEXT,
+                       selectcolor=CARD, font=(FONT, 9), anchor="w", bd=0,
+                       highlightthickness=0).pack(fill="x", pady=(px(8), 0))
 
         # Buttons
         bw = px(190)
@@ -332,7 +337,7 @@ class App(tk.Tk):
         default = f"Anleitung_{datetime.now():%Y%m%d_%H%M%S}.docx"
         path = filedialog.asksaveasfilename(
             title="Anleitung speichern", defaultextension=".docx", initialfile=default,
-            filetypes=[("Word-Dokument", "*.docx")])
+            filetypes=[("Word-Dokument", "*.docx"), ("PDF-Dokument", "*.pdf")])
         if not path:
             if messagebox.askyesno("Verwerfen?", "Ohne Speichern gehen alle Schritte verloren. "
                                                  "Wirklich verwerfen?"):
@@ -340,12 +345,13 @@ class App(tk.Tk):
                 return
             path = str(Path.home() / default)
 
-        self._status.set("Word-Dokument wird erstellt …")
+        self._status.set("Dokument wird erstellt …")
         result: dict = {}
+        zoom = self._zoom.get()
 
         def work() -> None:
             try:
-                export_docx(steps, Path(path), label, title=title, intro=intro)
+                export_document(steps, Path(path), label, title=title, intro=intro, zoom=zoom)
             except Exception as exc:
                 log.exception("Export fehlgeschlagen")
                 result["error"] = exc

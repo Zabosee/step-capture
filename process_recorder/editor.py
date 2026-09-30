@@ -115,7 +115,7 @@ class StepEditor(tk.Toplevel):
                       self._scale).pack(side="left", padx=px(8))
         g.RoundButton(bar, "Schritt löschen", g.RED, g.RED_H, self._delete, px(140), px(38),
                       self._scale).pack(side="left")
-        g.RoundButton(bar, "Als Word speichern …", g.GREEN, g.GREEN_H, self._save, px(200),
+        g.RoundButton(bar, "Speichern (Word/PDF) …", g.GREEN, g.GREEN_H, self._save, px(200),
                       px(38), self._scale).pack(side="right")
         g.RoundButton(bar, "Verwerfen", grey, grey_h, self._discard, px(110), px(38),
                       self._scale).pack(side="right", padx=(0, px(8)))
