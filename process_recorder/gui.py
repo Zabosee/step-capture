@@ -270,8 +270,7 @@ class App(tk.Tk):
             messagebox.showinfo("Keine Schritte", "Es wurden keine Schritte aufgezeichnet.")
             self._finish("Bereit.")
         else:
-            messagebox.showinfo("Fertig", f"Anleitung gespeichert:
-{path}")
+            messagebox.showinfo("Fertig", f"Anleitung gespeichert:\n{path}")
             self._finish(f"Gespeichert: {path}")
 
     def _finish(self, message: str) -> None:
