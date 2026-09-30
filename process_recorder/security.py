@@ -14,6 +14,9 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
+import time
+import contextlib
 
 log = logging.getLogger(__name__)
 
@@ -134,6 +137,10 @@ class SensitiveContextDetector:
         self._own_pid = os.getpid()
         self._uia = None
         self._uia_failed = False
+        self._uia_thread: "threading.Thread | None" = None
+        self._uia_lock = threading.Lock()
+        self._uia_value = False
+        self._uia_stamp = 0.0
         self.reason = ""             # Auslöser der letzten Erkennung (für das Log)
 
     # -- schnelle Prüfung (darf in Eingabe-Callbacks laufen) ------------------
@@ -182,10 +189,39 @@ class SensitiveContextDetector:
     def is_sensitive(self) -> bool:
         if self.is_sensitive_fast():
             return True
-        if self._uia_password_focused():
+        if self._uia_result_fresh():
             self.reason = "Passwortfeld (UI Automation)"
             return True
         return False
+
+    # UI Automation kann bei einem beschäftigten/hängenden Zielprogramm (z. B. einem
+    # gerade startenden Installer) sehr lange blockieren. Deshalb läuft die Abfrage in
+    # einem eigenen Thread; der Poll-Thread liest nur das letzte Ergebnis und bleibt
+    # dadurch immer reaktionsfähig.
+    _UIA_MAX_AGE = 1.0
+
+    def _uia_result_fresh(self) -> bool:
+        if not IS_WINDOWS or self._uia_failed:
+            return False
+        if self._uia_thread is None:
+            self._uia_thread = threading.Thread(target=self._uia_loop, daemon=True)
+            self._uia_thread.start()
+        with self._uia_lock:
+            value, stamp = self._uia_value, self._uia_stamp
+        return value and (time.monotonic() - stamp) <= self._UIA_MAX_AGE
+
+    def _uia_loop(self) -> None:
+        try:
+            import uiautomation as auto
+            init = auto.UIAutomationInitializerInThread()
+        except Exception:
+            init = contextlib.nullcontext()
+        with init:
+            while not self._uia_failed:
+                value = self._uia_password_focused()
+                with self._uia_lock:
+                    self._uia_value, self._uia_stamp = value, time.monotonic()
+                time.sleep(0.1)
 
     def _uia_password_focused(self) -> bool:
         if not IS_WINDOWS or self._uia_failed:
