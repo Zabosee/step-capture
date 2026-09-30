@@ -6,10 +6,8 @@ Erkennungsebenen:
   1. Sicherer Desktop (klassische UAC-Abfrage): ``OpenInputDesktop`` schlägt fehl.
   2. Vordergrundfenster gehört zu consent.exe / credwiz.exe / LogonUI.exe usw.
      oder hat eine bekannte Fensterklasse / den Titel "Benutzerkontensteuerung".
-  3. Vordergrundprozess läuft mit höheren Rechten als dieses Programm (Admin-Fenster)
-     bzw. lässt sich nicht abfragen (Zugriff verweigert -> höhere Rechte).
-  4. Fokussiertes Win32-Edit-Feld mit ES_PASSWORD-Stil (schnell, synchron).
-  5. UI Automation (``IsPassword``) für Browser, WPF, UWP usw. (langsamer, nur im Poll-Thread).
+  3. Fokussiertes Win32-Edit-Feld mit ES_PASSWORD-Stil (schnell, synchron).
+  4. UI Automation (``IsPassword``) für Browser, WPF, UWP usw. (langsamer, nur im Poll-Thread).
 """
 from __future__ import annotations
 
@@ -134,11 +132,8 @@ class SensitiveContextDetector:
 
     def __init__(self) -> None:
         self._own_pid = os.getpid()
-        self._own_elevated = False
         self._uia = None
         self._uia_failed = False
-        if IS_WINDOWS:
-            self._own_elevated = bool(_token_elevated(kernel32.GetCurrentProcess()))
 
     # -- schnelle Prüfung (darf in Eingabe-Callbacks laufen) ------------------
     def is_sensitive_fast(self) -> bool:
@@ -158,12 +153,12 @@ class SensitiveContextDetector:
             pid = wintypes.DWORD()
             tid = user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value and pid.value != self._own_pid:
-                name, elevated = _process_info(pid.value)
+                name, _elevated = _process_info(pid.value)
                 if name in SENSITIVE_PROCESSES:
                     return True
-                # Höher privilegiertes Fenster (Admin) bzw. Zugriff verweigert
-                if not self._own_elevated and (elevated is None or elevated):
-                    return True
+                # Bewusst KEINE Pause für Admin-Fenster an sich: nach der UAC-Bestätigung
+                # läuft z. B. ein Installer mit Adminrechten und soll aufgezeichnet werden.
+                # Geschützt bleiben UAC/Anmeldedialoge und Passwortfelder.
 
             info = _GUITHREADINFO()
             info.cbSize = ctypes.sizeof(info)
