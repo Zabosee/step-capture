@@ -14,6 +14,7 @@ from typing import List, Optional
 import mss
 from PIL import ImageTk
 
+from . import __version__
 from .branding import make_logo
 from .exporter import export_docx
 from .recorder import Recorder
@@ -92,7 +93,7 @@ class RoundButton(tk.Canvas):
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Process Recorder")
+        self.title(f"Process Recorder {__version__}")
         self.configure(bg=BG)
         self.resizable(False, False)
         self.attributes("-topmost", True)
@@ -174,7 +175,7 @@ class App(tk.Tk):
                      "nur unter Windows aktiv!")
         tk.Label(root, text=hint, bg=BG, fg=MUTED, font=(FONT, 9), wraplength=px(390),
                  justify="left").pack(anchor="w", pady=(px(10), 0))
-        tk.Label(root, text="made by Lukas Dostal", bg=BG, fg="#A0A4B8",
+        tk.Label(root, text=f"Version {__version__}  ·  made by Lukas Dostal", bg=BG, fg="#A0A4B8",
                  font=(FONT, 8)).pack(anchor="e", pady=(px(10), 0))
 
     def _on_configure(self, _event=None) -> None:
