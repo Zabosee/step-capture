@@ -18,7 +18,17 @@ def _enable_dpi_awareness() -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO,
+    handlers = [logging.StreamHandler()]
+    try:                                    # Protokolldatei für Fehlersuche (die exe hat keine Konsole)
+        import os
+        from logging.handlers import RotatingFileHandler
+        log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "ProcessRecorder")
+        os.makedirs(log_dir, exist_ok=True)
+        handlers.append(RotatingFileHandler(os.path.join(log_dir, "log.txt"), maxBytes=512_000,
+                                            backupCount=2, encoding="utf-8"))
+    except Exception:
+        pass
+    logging.basicConfig(level=logging.INFO, handlers=handlers,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     _enable_dpi_awareness()
     from process_recorder.gui import App

@@ -1,6 +1,7 @@
 """Datenmodell eines aufgezeichneten Schritts."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
@@ -21,6 +22,27 @@ class Step:
     text: str = ""
     target: Optional[str] = None                # per UI Automation ermitteltes Klickziel
     custom: Optional[str] = None                # vom Nutzer überschriebene Beschreibung
+
+    def headline(self) -> str:
+        """Kurze Überschrift für die Anleitung, z. B. „Schaltfläche „Weiter“ anklicken“."""
+        if self.kind == "click":
+            match = re.match(r"^(.+?) „(.+?)“", self.target or "")
+            what = f"{match.group(1)} „{match.group(2)}“" if match else None
+            if self.button == "right":
+                return f"Rechtsklick auf {what}" if what else "Rechtsklick"
+            if self.button == "middle":
+                return f"Mittelklick auf {what}" if what else "Mittelklick"
+            if self.clicks == 2:
+                return f"Doppelklick auf {what}" if what else "Doppelklick"
+            if self.clicks > 2:
+                return f"{self.clicks}-fach-Klick auf {what}" if what else f"{self.clicks}-fach-Klick"
+            return f"{what} anklicken" if what else "Klick"
+        if self.kind == "text":
+            return "Text eingeben"
+        if self.kind == "key":
+            return (f"Tastenkombination {self.text} drücken" if "+" in self.text
+                    else f"Taste {self.text} drücken")
+        return "Geschützter Bereich"
 
     def text_for_export(self) -> str:
         """Beschreibung für die Anleitung: eigene Fassung, sonst die automatische."""

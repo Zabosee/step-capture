@@ -119,9 +119,9 @@ def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "",
                                steps))
 
     for number, (step, image) in enumerate(zip(steps, images), start=1):
-        heading = doc.add_heading(f"Schritt {number}", level=2)
+        heading = doc.add_heading(f"Schritt {number}: {step.headline()}", level=2)
         heading.paragraph_format.keep_with_next = True
-        desc = doc.add_paragraph(f"Schritt {number}: {step.text_for_export()}")
+        desc = doc.add_paragraph(step.text_for_export())
         desc.paragraph_format.keep_with_next = True
 
         if step.kind == "protected":
