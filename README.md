@@ -19,6 +19,8 @@ Anmeldedialogen (credwiz, LogonUI), fokussierten Passwortfeldern (Win32 `ES_PASS
 sowie UI Automation für Browser/WPF/UWP). Zeichen der letzten 0,6 s vor Erkennung werden
 verworfen. Im Dokument erscheint ein Hinweis-Schritt; danach läuft die Aufnahme automatisch weiter (auch wenn danach ein Programm mit Adminrechten, z. B. ein Installer, im Vordergrund läuft).
 
+Hinweis: Die exe startet mit Administratorrechten (UAC-Abfrage beim Start). Nur so kann Windows Klicks und Eingaben in Admin-Fenstern (z. B. Installern) an den Recorder melden.
+
 ## Grenzen
 - Strg-Kombinationen (z. B. Einfügen mit Strg+V) werden nicht als Text erfasst.
 - Passwortfelder in Browsern werden nur erkannt, wenn diese Barrierefreiheit/UIA bereitstellen.
