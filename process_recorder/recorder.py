@@ -6,17 +6,20 @@ import logging
 import queue
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from .models import Step
 from .security import SensitiveContextDetector
+from .target import TargetResolver
 
 log = logging.getLogger(__name__)
 
 GRACE_SECONDS = 0.6          # so viel Text vor Erkennung eines sensiblen Kontexts wird verworfen
 POLL_INTERVAL = 0.15         # Takt der Sicherheitsüberwachung
+TARGET_TIMEOUT = 1.0         # so lange wartet ein Schritt maximal auf das Klickziel
 DOUBLE_CLICK_SECONDS = 0.4
 DOUBLE_CLICK_DISTANCE = 6
 
@@ -32,6 +35,7 @@ class _Event:
     button: str = "left"
     text: str = ""
     capture: bool = True         # False: kein Screenshot (sensibler Kontext)
+    target: Optional[Future] = None   # Klickziel (UI Automation), wird im Hintergrund ermittelt
 
 
 class Recorder:
@@ -54,6 +58,7 @@ class Recorder:
         self._stop = threading.Event()
         self._poke = threading.Event()
         self._detector = SensitiveContextDetector()
+        self._resolver = TargetResolver()
         self._threads: List[threading.Thread] = []
         self._listeners: list = []
         self._running = False
@@ -101,6 +106,7 @@ class Recorder:
         self._stop.set()
         self._poke.set()
         self._queue.put(None)                    # beendet den Capture-Worker nach Restarbeit
+        self._resolver.close()
 
     def finish(self) -> List[Step]:
         """Wartet auf den Capture-Worker und liefert alle Schritte in zeitlicher Reihenfolge."""
@@ -220,7 +226,8 @@ class Recorder:
                 return                            # anderer Monitor
             self._flush_text()                    # Text endet mit dem Klick
             self._queue.put(_Event("click", time.time(), x=int(x), y=int(y),
-                                   button=getattr(button, "name", "left")))
+                                   button=getattr(button, "name", "left"),
+                                   target=self._resolver.submit(int(x), int(y))))
         except Exception:
             log.exception("Fehler im Maus-Callback")
 
@@ -266,10 +273,19 @@ class Recorder:
                 return
             path = self._grab(sct)
             self.steps.append(Step("click", ev.ts, image_path=path, click_rel=rel,
-                                   button=ev.button))
+                                   button=ev.button, target=self._target_text(ev)))
         elif ev.kind == "text":
             path = self._grab(sct) if ev.capture else None
             self.steps.append(Step("text", ev.ts, image_path=path, text=ev.text))
+
+    @staticmethod
+    def _target_text(ev: _Event) -> Optional[str]:
+        if ev.target is None:
+            return None
+        try:
+            return ev.target.result(timeout=TARGET_TIMEOUT)
+        except Exception:                         # Timeout oder Fehler: Schritt ohne Ziel
+            return None
 
     def _grab(self, sct) -> Path:
         from PIL import Image

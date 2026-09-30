@@ -19,6 +19,7 @@ class Step:
     button: str = "left"
     clicks: int = 1                             # 2 = Doppelklick usw.
     text: str = ""
+    target: Optional[str] = None                # per UI Automation ermitteltes Klickziel
 
     def description(self) -> str:
         """Automatisch erzeugte Kurzbeschreibung des Schritts."""
@@ -30,6 +31,8 @@ class Step:
                 name = f"{self.clicks}-fach-Klick"
             else:
                 name = BUTTON_NAMES.get(self.button, "Klick")
+            if self.target:
+                return f"{name} auf {self.target} (Koordinate {x}, {y})"
             return f"{name} bei Koordinate ({x}, {y})"
         if self.kind == "text":
             return "Texteingabe"
