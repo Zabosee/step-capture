@@ -1,4 +1,4 @@
-"""Vorschau-Editor: Schritte prüfen, löschen, umsortieren und Beschreibungen anpassen."""
+"""Vorschau-Editor: Schritte prüfen, löschen, umsortieren, Beschreibungen und Hinweise anpassen."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -9,13 +9,13 @@ from typing import Dict, List, Optional, Tuple
 from PIL import Image, ImageTk
 
 from .exporter import mark_click
-from .models import Step
+from .models import NOTE_KINDS, Step
 
 ACCENT = "#6366F1"
 
 
 class StepEditor(tk.Toplevel):
-    """Modaler Dialog. Ergebnis in ``result``: (Schritte, Titel, Einleitung) oder None (verworfen)."""
+    """Modaler Dialog. Ergebnis in ``result``: (Schritte, Titel, Einleitung, Abschluss) oder None."""
 
     def __init__(self, master, steps: List[Step], scale: float) -> None:
         # Farben/Buttons aus gui.py; Import erst hier, damit gui.py diesen Editor importieren kann
@@ -27,7 +27,7 @@ class StepEditor(tk.Toplevel):
         self.attributes("-topmost", True)
         self._scale = scale
         self.steps = list(steps)
-        self.result: Optional[Tuple[List[Step], str, str]] = None
+        self.result: Optional[Tuple[List[Step], str, str, str]] = None
         self._current: Optional[int] = None
         self._photos: Dict[Path, ImageTk.PhotoImage] = {}
         self._build()
@@ -62,10 +62,17 @@ class StepEditor(tk.Toplevel):
                                highlightbackground=g.BORDER, highlightcolor=ACCENT)
         self._title.insert(0, "Prozessdokumentation")
         self._title.pack(fill="x", ipady=px(5), pady=(px(4), px(8)))
-        tk.Label(top, text="EINLEITUNG (OPTIONAL)", bg=g.BG, fg=g.MUTED,
-                 font=(g.FONT, 8, "bold")).pack(anchor="w")
-        self._intro = self._text_box(top, 2)
-        self._intro.pack(fill="x", pady=(px(4), 0))
+        texts = tk.Frame(top, bg=g.BG)
+        texts.pack(fill="x")
+        texts.columnconfigure((0, 1), weight=1, uniform="texts")
+        tk.Label(texts, text="EINLEITUNG (OPTIONAL)", bg=g.BG, fg=g.MUTED,
+                 font=(g.FONT, 8, "bold")).grid(row=0, column=0, sticky="w")
+        self._intro = self._text_box(texts, 2)
+        self._intro.grid(row=1, column=0, sticky="ew", pady=(px(4), 0), padx=(0, px(6)))
+        tk.Label(texts, text="ABSCHLUSS / ERGEBNIS (OPTIONAL)", bg=g.BG, fg=g.MUTED,
+                 font=(g.FONT, 8, "bold")).grid(row=0, column=1, sticky="w", padx=(px(6), 0))
+        self._outro = self._text_box(texts, 2)
+        self._outro.grid(row=1, column=1, sticky="ew", pady=(px(4), 0), padx=(px(6), 0))
 
         body = tk.Frame(root, bg=g.BG)
         body.pack(fill="both", expand=True, pady=(px(14), 0))
@@ -108,6 +115,23 @@ class StepEditor(tk.Toplevel):
                                      font=(g.FONT, 8, "bold"))
         self._txt = self._text_box(right, 2)
 
+        self._section_caption = tk.Label(right, text="NEUER ABSCHNITT AB DIESEM SCHRITT (OPTIONAL)",
+                                         bg=g.BG, fg=g.MUTED, font=(g.FONT, 8, "bold"))
+        self._section_caption.pack(anchor="w", pady=(px(8), 0))
+        self._section = tk.Entry(right, font=(g.FONT, 10), relief="flat", highlightthickness=1,
+                                 highlightbackground=g.BORDER, highlightcolor=ACCENT)
+        self._section.pack(fill="x", ipady=px(3), pady=(px(4), 0))
+        note_head = tk.Frame(right, bg=g.BG)
+        note_head.pack(fill="x", pady=(px(8), 0))
+        tk.Label(note_head, text="HINWEIS ZUM SCHRITT (OPTIONAL)", bg=g.BG, fg=g.MUTED,
+                 font=(g.FONT, 8, "bold")).pack(side="left")
+        self._note_kind = tk.StringVar(value=NOTE_KINDS[0])
+        kind_menu = tk.OptionMenu(note_head, self._note_kind, *NOTE_KINDS)
+        kind_menu.configure(font=(g.FONT, 9), relief="flat", highlightthickness=0, bd=0)
+        kind_menu.pack(side="right")
+        self._note = self._text_box(right, 2)
+        self._note.pack(fill="x", pady=(px(4), 0))
+
         # Aktionsleiste
         bar = tk.Frame(root, bg=g.BG)
         bar.pack(fill="x", pady=(px(14), 0))
@@ -136,7 +160,8 @@ class StepEditor(tk.Toplevel):
         text = " ".join(step.text_for_export().split())
         if step.kind == "protected":
             text = "Geschützter Bereich (nicht aufgezeichnet)"
-        return f"{index + 1:>3}   {text if len(text) <= 46 else text[:45] + '…'}"
+        mark = "§" if step.section else " "
+        return f"{index + 1:>3} {mark} {text if len(text) <= 46 else text[:45] + '…'}"
 
     def _refresh(self, select: Optional[int] = None) -> None:
         self._list.delete(0, "end")
@@ -166,6 +191,9 @@ class StepEditor(tk.Toplevel):
         self._current = index
         self._desc.delete("1.0", "end")
         self._txt.delete("1.0", "end")
+        self._section.delete(0, "end")
+        self._note.delete("1.0", "end")
+        self._note_kind.set(NOTE_KINDS[0])
         if index is None:
             self._img_label.configure(image="", text="Keine Schritte")
             self._txt_caption.pack_forget()
@@ -173,9 +201,12 @@ class StepEditor(tk.Toplevel):
             return
         step = self.steps[index]
         self._desc.insert("1.0", step.text_for_export())
+        self._section.insert(0, step.section)
+        self._note.insert("1.0", step.note)
+        self._note_kind.set(step.note_kind if step.note_kind in NOTE_KINDS else NOTE_KINDS[0])
         if step.kind == "text":
-            self._txt_caption.pack(anchor="w", pady=(self._px(8), 0))
-            self._txt.pack(fill="x", pady=(self._px(4), 0))
+            self._txt_caption.pack(anchor="w", pady=(self._px(8), 0), before=self._section_caption)
+            self._txt.pack(fill="x", pady=(self._px(4), 0), before=self._section_caption)
             self._txt.insert("1.0", step.text)
         else:
             self._txt_caption.pack_forget()
@@ -211,6 +242,9 @@ class StepEditor(tk.Toplevel):
         step.custom = desc if desc and desc != step.description() else None
         if step.kind == "text":
             step.text = self._txt.get("1.0", "end-1c")
+        step.section = " ".join(self._section.get().split())
+        step.note = self._note.get("1.0", "end-1c").strip()
+        step.note_kind = self._note_kind.get()
         self._list.delete(i)
         self._list.insert(i, self._label(i, step))
 
@@ -240,7 +274,7 @@ class StepEditor(tk.Toplevel):
                                 parent=self)
             return
         self.result = (self.steps, self._title.get().strip(),
-                       self._intro.get("1.0", "end").strip())
+                       self._intro.get("1.0", "end").strip(), self._outro.get("1.0", "end").strip())
         self.destroy()
 
     def _discard(self) -> None:

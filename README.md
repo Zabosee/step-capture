@@ -9,11 +9,16 @@ können Virenscanner einen Fehlalarm auslösen.
 
 ## Bedienung
 1. Bildschirm wählen, **Start** klicken (Fenster am besten auf einen anderen Monitor schieben).
-2. Ablauf durchführen. Klicks = Schritt mit Screenshot + rotem Kreis und Beschreibung des Klickziels;
-   zusammenhängender Text = ein Textschritt; Tastenkürzel (Strg+S …), Enter, Esc, Entf und F-Tasten
-   sind eigene Schritte.
+2. Ablauf durchführen. Jeder Schritt wird als kurze Handlungsanweisung formuliert, z. B.
+   „Klicken Sie auf die Schaltfläche „Speichern“.“ oder „Geben Sie in das Eingabefeld „Name“
+   folgenden Text ein: „Max“ und klicken Sie auf die Schaltfläche „OK“.“ Klick ins Feld, Tippen und
+   der abschließende Klick bzw. Enter werden zu einem Schritt zusammengefasst; Kontrollkästchen,
+   Optionsfelder, Registerkarten, Menüs und Auswahlfelder haben eigene Formulierungen, ein
+   Programmwechsel wird vermerkt. Tastenkürzel (Strg+S …), Enter, Esc, Entf und F-Tasten sind
+   eigene Schritte. Jeder Klick-Schritt bekommt einen Screenshot mit rotem Kreis.
 3. **Beenden & speichern** klicken. In der Vorschau lassen sich Schritte löschen, verschieben und
-   beschriften sowie Titel und Einleitung setzen. Danach Speicherort und Format (Word oder PDF) wählen.
+   beschriften, Abschnitte beginnen, Hinweise/Tipps/Warnungen zu Schritten ergänzen sowie Titel,
+   Einleitung und Abschluss setzen. Danach Speicherort und Format (Word oder PDF) wählen.
 
 Tastenkürzel (global): **Strg+Alt+R** Start/Ende, **Strg+Alt+P** Pause/Fortsetzen. Die Option
 „Vergrößerten Ausschnitt um jeden Klick einfügen“ ergänzt unter dem Screenshot einen Zoom-Ausschnitt.

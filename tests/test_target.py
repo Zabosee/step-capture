@@ -158,3 +158,18 @@ def test_resolver_skips_when_previous_query_is_stuck():
     resolver._failed = False
     resolver._busy_since = target.time.monotonic() - target.STUCK_SECONDS - 1
     assert resolver.submit(1, 1).result(timeout=1) is None      # sofort, ohne zu warten
+
+
+class _Toggle:
+    def __init__(self, state):
+        self.ToggleState = state
+
+
+def test_describe_checkbox_reports_state_after_click(monkeypatch):
+    monkeypatch.setattr(target, "_app_name", lambda pid: "App")
+    monkeypatch.setattr(target, "TOGGLE_SETTLE_SECONDS", 0)
+    box = Ctl("CheckBoxControl", "Merken", parent=_window())
+    box.GetTogglePattern = lambda: _Toggle(1)
+    assert describe_point(FakeAuto(box), 10, 10).startswith("Kontrollkästchen „Merken“ [aktiviert]")
+    box.GetTogglePattern = lambda: _Toggle(2)                 # unbestimmt: kein Zustand
+    assert "[" not in describe_point(FakeAuto(box), 10, 10)

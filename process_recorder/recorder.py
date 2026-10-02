@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
-from .models import Step
+from .models import Step, app_of, element_kind, element_name
 from .redaction import RedactionFinder, pixelate_image, redact_image, to_image_rects
 from .security import SensitiveContextDetector
 from .target import TargetResolver
@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 GRACE_SECONDS = 0.6          # so viel Text vor Erkennung eines sensiblen Kontexts wird verworfen
 POLL_INTERVAL = 0.15         # Takt der Sicherheitsüberwachung
+TEXT_FIELDS = ("Eingabefeld", "Zahlenfeld", "Auswahlfeld")  # Klick hinein + Tippen = 1 Schritt
 TARGET_TIMEOUT = 1.0         # so lange wartet ein Schritt maximal auf das Klickziel
 DOUBLE_CLICK_SECONDS = 0.4
 DOUBLE_CLICK_DISTANCE = 6
@@ -60,6 +61,7 @@ class Recorder:
         self.redact = redact                     # sensible Felder in Screenshots schwärzen
 
         self.steps: List[Step] = []              # wird nur vom Worker-Thread beschrieben
+        self._last_app = ""                       # Programm des letzten Klicks
 
         self._queue: "queue.Queue[Optional[_Event]]" = queue.Queue()
         self._lock = threading.Lock()
@@ -351,7 +353,8 @@ class Recorder:
         if ev.kind == "click":
             last = self.steps[-1] if self.steps else None
             rel = (ev.x - self._monitor["left"], ev.y - self._monitor["top"])
-            if (last and last.kind == "click" and last.button == ev.button
+            if (last and last.kind in ("click", "text") and last.click_rel
+                    and last.button == ev.button
                     and ev.ts - last.timestamp <= DOUBLE_CLICK_SECONDS
                     and abs(last.click_rel[0] - rel[0]) <= DOUBLE_CLICK_DISTANCE
                     and abs(last.click_rel[1] - rel[1]) <= DOUBLE_CLICK_DISTANCE):
@@ -359,14 +362,55 @@ class Recorder:
                 last.timestamp = ev.ts
                 return
             path = self._grab(sct, ev.redact)
-            self.steps.append(Step("click", ev.ts, image_path=path, click_rel=rel,
-                                   button=ev.button, target=self._target_text(ev)))
+            target = self._target_text(ev)
+            if self._open_text(last):             # „Text eingeben und auf … klicken“
+                last.timestamp, last.image_path, last.click_rel = ev.ts, path, rel
+                last.button, last.target = ev.button, target
+                return
+            if (self._plain_click(last, "Auswahlfeld") and not last.field
+                    and ev.button == "left" and element_name(target)
+                    and element_kind(target) in ("Listeneintrag", "Menüeintrag")):
+                # „Wählen Sie im Auswahlfeld „Land“ den Eintrag „Deutschland“ aus.“
+                last.field, last.target = last.target, target
+                last.timestamp, last.image_path, last.click_rel = ev.ts, path, rel
+                return
+            step = Step("click", ev.ts, image_path=path, click_rel=rel, button=ev.button,
+                        target=target)
+            app = app_of(target)
+            if app and app != self._last_app and "Taskleiste" not in (target or ""):
+                step.switch_to = app              # „Wechseln Sie zu „Word“. …“
+                self._last_app = app
+            self.steps.append(step)
         elif ev.kind == "key":
-            self.steps.append(Step("key", ev.ts, image_path=self._grab(sct, ev.redact),
-                                   text=ev.text))
+            path = self._grab(sct, ev.redact)
+            last = self.steps[-1] if self.steps else None
+            if self._open_text(last):             # „Text eingeben und Enter drücken“
+                last.timestamp, last.image_path, last.key = ev.ts, path, ev.text
+                return
+            self.steps.append(Step("key", ev.ts, image_path=path, text=ev.text))
         elif ev.kind == "text":
             path = self._grab(sct, ev.redact) if ev.capture else None
+            last = self.steps[-1] if self.steps else None
+            if any(self._plain_click(last, kind) for kind in TEXT_FIELDS) \
+                    and element_name(last.target):
+                # Klick ins Feld + Tippen: „Geben Sie in das Eingabefeld „Name“ … ein.“
+                last.kind, last.text, last.timestamp = "text", ev.text, ev.ts
+                last.field, last.target, last.click_rel = last.target, None, None
+                if path:
+                    last.image_path = path
+                return
             self.steps.append(Step("text", ev.ts, image_path=path, text=ev.text))
+
+    @staticmethod
+    def _plain_click(step: Optional[Step], kind: str) -> bool:
+        """Einfacher Linksklick auf ein Element des Typs ``kind``."""
+        return bool(step and step.kind == "click" and step.button == "left"
+                    and step.clicks == 1 and element_kind(step.target) == kind)
+
+    @staticmethod
+    def _open_text(step: Optional[Step]) -> bool:
+        """Texteingabe, die noch mit keinem Klick/keiner Taste abgeschlossen wurde."""
+        return bool(step and step.kind == "text" and not step.click_rel and not step.key)
 
     @staticmethod
     def _target_text(ev: _Event) -> Optional[str]:

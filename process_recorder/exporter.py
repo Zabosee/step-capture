@@ -77,8 +77,8 @@ def zoom_box(size: Tuple[int, int], click: Tuple[int, int]) -> Tuple[int, int, i
 
 
 def _prepare_zoom(step: Step) -> Optional[io.BytesIO]:
-    """Vergrößerter Ausschnitt rund um den Klick (nur für Klick-Schritte)."""
-    if step.kind != "click" or not step.click_rel or not step.image_path \
+    """Vergrößerter Ausschnitt rund um den Klick."""
+    if not step.click_rel or not step.image_path \
             or not Path(step.image_path).exists():
         return None
     with Image.open(step.image_path) as raw:
@@ -108,13 +108,19 @@ def prepare_images(steps, zoom: bool = True):
         return list(pool.map(one, steps))
 
 
+# Hintergrundfarbe der Hinweis-Kästen je Art
+NOTE_FILLS = {"Hinweis": "DEEAF6", "Tipp": "E2F0D9", "Warnung": "FCE4E4"}
+
+
 def export_document(steps, output: Path, monitor_label: str = "", title: str = "",
-                    intro: str = "", zoom: bool = True) -> Path:
+                    intro: str = "", outro: str = "", zoom: bool = True) -> Path:
     """Exportiert je nach Dateiendung als Word (.docx) oder PDF (.pdf)."""
     if Path(output).suffix.lower() == ".pdf":
         from .pdf_export import export_pdf
-        return export_pdf(steps, output, monitor_label, title=title, intro=intro, zoom=zoom)
-    return export_docx(steps, output, monitor_label, title=title, intro=intro, zoom=zoom)
+        return export_pdf(steps, output, monitor_label, title=title, intro=intro, outro=outro,
+                          zoom=zoom)
+    return export_docx(steps, output, monitor_label, title=title, intro=intro, outro=outro,
+                       zoom=zoom)
 
 
 def _shade_cell(cell, hex_fill: str) -> None:
@@ -144,8 +150,16 @@ def _add_note_box(doc, label: str, text: str, mono: bool, fill: str) -> None:
             r.font.size = Pt(11)
 
 
+def _add_step_note(doc, step: Step) -> None:
+    """Hinweis/Tipp/Warnung des Nutzers als farbiger Kasten."""
+    if step.note.strip():
+        doc.add_paragraph().paragraph_format.space_after = Pt(0)
+        _add_note_box(doc, f"{step.note_kind}:", step.note.strip(), mono=False,
+                      fill=NOTE_FILLS.get(step.note_kind, NOTE_FILLS["Hinweis"]))
+
+
 def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "",
-                title: str = "", intro: str = "", zoom: bool = True) -> Path:
+                title: str = "", intro: str = "", outro: str = "", zoom: bool = True) -> Path:
     """Erzeugt die Word-Anleitung und gibt den Pfad zurück."""
     steps = list(steps)
     doc = Document()
@@ -159,6 +173,7 @@ def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "",
     normal.font.size = Pt(11)
 
     title, intro, monitor_label = clean_text(title), clean_text(intro), clean_text(monitor_label)
+    outro = clean_text(outro)
     doc.add_heading(title.strip() or "Prozessdokumentation", level=0)
     if intro.strip():
         for line in intro.strip().split("\n"):
@@ -173,7 +188,10 @@ def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "",
     images = prepare_images(steps, zoom)
 
     for number, (step, (image, zoomed)) in enumerate(zip(steps, images), start=1):
-        heading = doc.add_heading(f"Schritt {number}: {clean_text(step.headline())}", level=2)
+        if step.section.strip():
+            doc.add_heading(clean_text(step.section.strip()), level=1).paragraph_format \
+                .keep_with_next = True
+        heading = doc.add_heading(f"Schritt {number}", level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph(step.text_for_export())
         desc.paragraph_format.keep_with_next = True
@@ -181,6 +199,7 @@ def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "",
         if step.kind == "protected":
             _add_note_box(doc, "Hinweis: Dieser Bereich wurde bewusst nicht aufgezeichnet.",
                           "", mono=False, fill="FFF2CC")
+            _add_step_note(doc, step)
             continue
 
         if image is not None:
@@ -200,7 +219,13 @@ def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "",
         if step.kind == "text" and step.text:
             _add_note_box(doc, "Eingegebener Text zum Kopieren:", step.text,
                           mono=True, fill="F2F2F2")
+        _add_step_note(doc, step)
         doc.add_paragraph()
+
+    if outro.strip():
+        doc.add_heading("Abschluss", level=1).paragraph_format.keep_with_next = True
+        for line in outro.strip().split("\n"):
+            doc.add_paragraph(line)
 
     output = Path(output)
     doc.save(output)
