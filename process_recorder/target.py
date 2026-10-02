@@ -229,7 +229,7 @@ def describe_point(auto, x: int, y: int) -> Optional[str]:
     # Klick auf Text/Bild/Zelle innerhalb eines Elements → das Element beschreiben
     cell = ""
     if type_name in LEAF_TYPES:
-        leaf, leaf_name = control, _clip(control.Name)
+        leaf_name = _clip(control.Name)
         node = control
         for _ in range(4):
             with contextlib.suppress(Exception):

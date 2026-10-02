@@ -14,7 +14,8 @@ from process_recorder.redaction import (RedactionFinder, is_sensitive_name, reda
     ("", "user_password"), ("PIN", ""), ("PIN-Code", ""), ("", "pinField"), ("API-Key", ""),
     ("", "apiKey"), ("API Key", ""), ("Token", ""), ("Secret", ""), ("Client Secret", ""),
     ("IBAN", ""), ("", "IbanInput"), ("Kreditkartennummer", ""), ("Credit Card Number", ""),
-    ("CVV", ""), ("Geheimzahl", ""),
+    ("CVV", ""), ("Geheimzahl", ""), ("Ｐａｓｓｗｏｒｄ", ""), ("OTP", ""), ("Passphrase", ""),
+    ("Bestätigungscode", ""), ("Verification Code", ""), ("SSN", ""), ("", "txtOtpCode"),
 ])
 def test_sensitive_names(name, auto_id):
     assert is_sensitive_name(name, auto_id)
@@ -120,3 +121,13 @@ def test_finder_coalesces_requests_waiting_behind_a_running_search():
     assert f.result(second, timeout=5) == [(1, 2, 3, 4)]
     assert len(calls) == 2
     f.close()
+
+
+def test_pixelate_makes_text_unreadable_but_keeps_size():
+    img = Image.new("RGB", (64, 64), (255, 255, 255))
+    for x in range(0, 64, 2):
+        img.putpixel((x, 10), (0, 0, 0))              # feine Linien wie Schrift
+    out = redaction.pixelate_image(img)
+    assert out.size == img.size
+    assert len({out.getpixel((x, 10)) for x in range(16)}) == 1
+

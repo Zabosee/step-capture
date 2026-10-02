@@ -6,6 +6,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
+# XML-1.0-unzulässige Zeichen (Steuerzeichen, Surrogate, U+FFFE/FFFF): Fenster-/Elementnamen
+# stammen aus fremden Programmen und würden sonst den Word-Export abbrechen lassen.
+_XML_INVALID = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+
+
+def clean_text(text) -> str:
+    """Entfernt Zeichen, die in Word/XML nicht darstellbar sind."""
+    return _XML_INVALID.sub("", text or "")
+
+
 BUTTON_NAMES = {"left": "Linksklick", "right": "Rechtsklick", "middle": "Mittelklick"}
 
 
@@ -46,7 +56,7 @@ class Step:
 
     def text_for_export(self) -> str:
         """Beschreibung für die Anleitung: eigene Fassung, sonst die automatische."""
-        return self.custom or self.description()
+        return clean_text(self.custom or self.description())
 
     def description(self) -> str:
         """Automatisch erzeugte Kurzbeschreibung des Schritts."""

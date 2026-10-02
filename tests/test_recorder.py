@@ -199,3 +199,19 @@ def test_finish_redacts_backlog_before_closing_services(tmp_path, monkeypatch):
     r._queue.get_nowait()                                 # Ende-Marker entfernen: kein Worker läuft hier
     r.finish()
     assert sorted(closed) == ["redactor", "resolver"]
+
+
+def test_grab_pixelates_when_redaction_search_impossible(rec):
+    from concurrent.futures import Future
+    from PIL import Image
+
+    class FakeSct:
+        def grab(self, mon):
+            return SimpleNamespace(size=(32, 32),
+                                   bgra=(bytes([0, 0, 0, 255]) + bytes([255, 255, 255, 255])) * 512)
+
+    rec._monitor = {"left": 0, "top": 0, "width": 32, "height": 32}
+    fut = Future()
+    fut.set_result(None)                      # Suche nicht möglich (Zeitüberschreitung/Fehler)
+    img = Image.open(rec._grab(FakeSct(), fut))
+    assert len({img.getpixel((x, 0)) for x in range(8)}) == 1

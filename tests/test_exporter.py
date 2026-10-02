@@ -113,3 +113,23 @@ def test_export_document_dispatches_by_extension(tmp_path, shot):
     steps = _steps(shot)
     assert export_document(steps, tmp_path / "x.docx").read_bytes()[:2] == b"PK"   # zip = docx
     assert export_document(steps, tmp_path / "x.PDF").read_bytes().startswith(b"%PDF")
+
+
+HOSTILE = [
+    Step("click", 1, click_rel=(5, 5), target="Schaltfläche „a\x00b\x08c“ – Fenster \x1f"),
+    Step("text", 2, text="pw\x0bx\ud800y"),
+    Step("click", 3, click_rel=(5, 5), custom="x\x1fy"),
+    Step("text", 4, text="A" * 20000),
+    Step("text", 5, text="\n".join(f"zeile {i}" for i in range(3000))),
+    Step("text", 6, text="<b>x</b> <img src='/etc/passwd'/> &#0; <font size=99999>"),
+]
+
+
+@pytest.mark.parametrize("ext", ["docx", "pdf"])
+def test_export_survives_hostile_text(tmp_path, ext):
+    """Steuerzeichen/Surrogate aus fremden Fenstern oder extrem lange Eingaben dürfen den Export nicht abbrechen."""
+    out = export_document(HOSTILE, tmp_path / f"x.{ext}", "Mon\x00itor", title="T\x00", intro="i\x01")
+    assert out.stat().st_size > 0
+    if ext == "docx":
+        text = "\n".join(p.text for p in Document(out).paragraphs)
+        assert "\x00" not in text

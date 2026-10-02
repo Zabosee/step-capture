@@ -5,7 +5,8 @@ markiert sind (``IsPassword``) oder deren Name/Kennung auf sensible Inhalte hind
 Gelesen werden ausschließlich Name, Kennung und Rechteck – nie der Inhalt eines Feldes.
 
 Wie beim Klickziel (target.py) läuft die Abfrage in einem eigenen Thread; der Aufrufer
-wartet nur begrenzt. Bei Zeitüberschreitung oder Fehler wird ohne Schwärzung weitergemacht.
+wartet nur begrenzt. Bei Zeitüberschreitung oder Fehler schlägt der Schutz nicht still fehl:
+Der Recorder verpixelt dann den ganzen Screenshot (``pixelate_image``).
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import re
 import sys
 import threading
 import time
+import unicodedata
 from concurrent.futures import Future
 from typing import Iterable, List, Optional, Tuple
 
@@ -34,9 +36,12 @@ Rect = Tuple[int, int, int, int]        # links, oben, rechts, unten (Bildschirm
 # (fängt auch „txtPassword“, „api_key“, „CreditCardNumber“).
 _LONG_TERMS = ("passwort", "passwd", "password", "kennwort", "secret", "geheim", "token",
                "apikey", "kreditkarte", "creditcard", "cardnumber", "kartennummer",
-               "sicherheitscode", "securitycode")
+               "sicherheitscode", "securitycode", "passcode", "passphrase", "kontonummer",
+               "accountnumber", "privatekey", "recoverykey", "wiederherstellungs",
+               "verificationcode", "bestaetigungscode", "bestätigungscode", "sozialversicherung",
+               "socialsecurity", "steuerid", "kartenpruef", "kartenprüf")
 # Kurze Begriffe: nur als eigenes Wort (sonst „Spinner“, „Pinterest“, „Pipeline“ …)
-_SHORT_TERMS = {"pin", "pwd", "iban", "cvv", "cvc", "tan", "puk"}
+_SHORT_TERMS = {"pin", "pwd", "iban", "cvv", "cvc", "tan", "puk", "otp", "2fa", "mfa", "ssn", "bic", "swift", "cvv2"}
 _CAMEL = re.compile(r"(?<=[a-zäöü0-9])(?=[A-ZÄÖÜ])")
 _SPLIT = re.compile(r"[^0-9a-zäöüß]+")
 
@@ -46,6 +51,7 @@ def is_sensitive_name(name: str = "", automation_id: str = "") -> bool:
     for text in (name, automation_id):
         if not text:
             continue
+        text = unicodedata.normalize("NFKC", text)        # z. B. vollbreite Buchstaben
         words = [w for w in _SPLIT.split(_CAMEL.sub(" ", text).lower()) if w]
         if _SHORT_TERMS.intersection(words):
             return True
@@ -94,6 +100,15 @@ def redact_image(img, rects: Iterable[Rect]):
     return img
 
 
+def pixelate_image(img, block: int = 16):
+    """Macht den ganzen Screenshot unleserlich (Layout bleibt erkennbar); liefert ein neues Bild."""
+    from PIL import Image
+
+    w, h = img.size
+    small = img.resize((max(1, w // block), max(1, h // block)), Image.BOX)
+    return small.resize((w, h), Image.NEAREST)
+
+
 def find_sensitive_rects(auto_client) -> List[Rect]:
     """Rechtecke aller sichtbaren sensiblen Eingabefelder auf dem Desktop (Bildschirm-Pixel).
 
@@ -108,6 +123,7 @@ def find_sensitive_rects(auto_client) -> List[Rect]:
     cond = ia.CreateAndCondition(visible, ia.CreateOrCondition(is_pwd, is_edit))
     cache = ia.CreateCacheRequest()
     for prop in (core.UIA_NamePropertyId, core.UIA_AutomationIdPropertyId,
+                 getattr(core, "UIA_HelpTextPropertyId", 30013),
                  core.UIA_IsPasswordPropertyId, core.UIA_BoundingRectanglePropertyId):
         cache.AddProperty(prop)                   # bewusst ohne Value-Eigenschaft: Inhalt tabu
 
@@ -117,7 +133,8 @@ def find_sensitive_rects(auto_client) -> List[Rect]:
         el = found.GetElement(i)
         try:
             sensitive = bool(el.CachedIsPassword) or is_sensitive_name(
-                el.CachedName or "", el.CachedAutomationId or "")
+                el.CachedName or "", el.CachedAutomationId or "") or is_sensitive_name(
+                el.CachedHelpText or "")
             if not sensitive:
                 continue
             rc = el.CachedBoundingRectangle

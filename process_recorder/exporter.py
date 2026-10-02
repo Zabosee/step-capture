@@ -12,10 +12,10 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt, RGBColor
+from docx.shared import Cm, Pt
 from PIL import Image, ImageDraw
 
-from .models import Step
+from .models import Step, clean_text
 
 MAX_IMAGE_WIDTH_PX = 1600   # Screenshots werden für die Datei verkleinert
 IMAGE_WIDTH_CM = 16.0
@@ -135,7 +135,7 @@ def _add_note_box(doc, label: str, text: str, mono: bool, fill: str) -> None:
     p = cell.paragraphs[0]
     run = p.add_run(label)
     run.bold = True
-    for line in (text.split("\n") if text else []):
+    for line in (clean_text(text).split("\n") if text else []):
         para = cell.add_paragraph()
         r = para.add_run(line)
         if mono:
@@ -158,6 +158,7 @@ def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "",
     normal.font.name = "Calibri"
     normal.font.size = Pt(11)
 
+    title, intro, monitor_label = clean_text(title), clean_text(intro), clean_text(monitor_label)
     doc.add_heading(title.strip() or "Prozessdokumentation", level=0)
     if intro.strip():
         for line in intro.strip().split("\n"):
@@ -172,7 +173,7 @@ def export_docx(steps: Iterable[Step], output: Path, monitor_label: str = "",
     images = prepare_images(steps, zoom)
 
     for number, (step, (image, zoomed)) in enumerate(zip(steps, images), start=1):
-        heading = doc.add_heading(f"Schritt {number}: {step.headline()}", level=2)
+        heading = doc.add_heading(f"Schritt {number}: {clean_text(step.headline())}", level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph(step.text_for_export())
         desc.paragraph_format.keep_with_next = True

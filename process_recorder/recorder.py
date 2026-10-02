@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from .models import Step
-from .redaction import RedactionFinder, redact_image, to_image_rects
+from .redaction import RedactionFinder, pixelate_image, redact_image, to_image_rects
 from .security import SensitiveContextDetector
 from .target import TargetResolver
 
@@ -60,7 +60,6 @@ class Recorder:
         self.redact = redact                     # sensible Felder in Screenshots schwärzen
 
         self.steps: List[Step] = []              # wird nur vom Worker-Thread beschrieben
-        self.error_count = 0
 
         self._queue: "queue.Queue[Optional[_Event]]" = queue.Queue()
         self._lock = threading.Lock()
@@ -340,7 +339,6 @@ class Recorder:
                 try:
                     self._handle_event(sct, event)
                 except Exception:
-                    self.error_count += 1
                     log.exception("Schritt konnte nicht aufgezeichnet werden")
 
     def _handle_event(self, sct, ev: _Event) -> None:
@@ -394,10 +392,13 @@ class Recorder:
         if pending is not None:
             try:
                 screen_rects = self._redactor.result(pending)
-                if screen_rects:
+                if screen_rects is None:          # Suche nicht möglich: lieber alles unkenntlich
+                    img = pixelate_image(img)
+                elif screen_rects:
                     redact_image(img, to_image_rects(screen_rects, self._monitor, img.size))
             except Exception:
-                log.exception("Schwärzen fehlgeschlagen – Screenshot bleibt unverändert")
+                log.exception("Schwärzen fehlgeschlagen – Screenshot wird verpixelt")
+                img = pixelate_image(img)
         path = self._workdir / f"step_{len(self.steps):04d}.jpg"
         img.save(path, quality=88)
         return path

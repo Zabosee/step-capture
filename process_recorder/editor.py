@@ -23,6 +23,7 @@ class StepEditor(tk.Toplevel):
         self._g = gui
         super().__init__(master, bg=gui.BG)
         self.title("Anleitung prüfen und anpassen")
+        self.resizable(True, True)
         self.attributes("-topmost", True)
         self._scale = scale
         self.steps = list(steps)
@@ -50,7 +51,7 @@ class StepEditor(tk.Toplevel):
     def _build(self) -> None:
         g, px = self._g, self._px
         root = tk.Frame(self, bg=g.BG)
-        root.pack(padx=px(18), pady=px(16))
+        root.pack(padx=px(18), pady=px(16), fill="both", expand=True)
 
         # Titel + Einleitung
         top = tk.Frame(root, bg=g.BG)
@@ -67,17 +68,19 @@ class StepEditor(tk.Toplevel):
         self._intro.pack(fill="x", pady=(px(4), 0))
 
         body = tk.Frame(root, bg=g.BG)
-        body.pack(fill="both", pady=(px(14), 0))
+        body.pack(fill="both", expand=True, pady=(px(14), 0))
 
         # Links: Schrittliste
         left = tk.Frame(body, bg=g.CARD, highlightthickness=1, highlightbackground=g.BORDER)
-        left.pack(side="left", fill="y")
+        left.pack(side="left", fill="both")
         self._count = tk.Label(left, bg=g.CARD, fg=g.MUTED, font=(g.FONT, 9), anchor="w")
         self._count.pack(fill="x", padx=px(10), pady=(px(8), px(4)))
         list_frame = tk.Frame(left, bg=g.CARD)
         list_frame.pack(fill="both", expand=True, padx=(px(4), 0), pady=(0, px(4)))
         scroll = tk.Scrollbar(list_frame)
-        self._list = tk.Listbox(list_frame, width=44, height=17, font=(g.FONT, 10), bd=0,
+        screen_h = self.winfo_screenheight()
+        rows = max(8, min(17, (screen_h - px(620)) // px(22)))
+        self._list = tk.Listbox(list_frame, width=44, height=rows, font=(g.FONT, 10), bd=0,
                                 highlightthickness=0, activestyle="none", exportselection=False,
                                 selectbackground=ACCENT, selectforeground="white",
                                 yscrollcommand=scroll.set, bg=g.CARD, fg=g.TEXT)
@@ -89,7 +92,8 @@ class StepEditor(tk.Toplevel):
         # Rechts: Vorschau + Bearbeitung
         right = tk.Frame(body, bg=g.BG)
         right.pack(side="left", fill="both", padx=(px(14), 0))
-        self._img_w, self._img_h = px(520), px(300)
+        self._img_w = px(520)
+        self._img_h = max(px(180), min(px(300), int(screen_h * 0.3)))
         img_frame = tk.Frame(right, bg="#E9EAF3", width=self._img_w, height=self._img_h)
         img_frame.pack()
         img_frame.pack_propagate(False)
@@ -152,8 +156,11 @@ class StepEditor(tk.Toplevel):
         sel = self._list.curselection()
         if not sel or sel[0] == self._current:
             return
-        self._commit()
-        self._show(sel[0])
+        target = sel[0]
+        self._commit()                           # ersetzt die Zeile des alten Schritts
+        self._list.selection_clear(0, "end")
+        self._list.selection_set(target)
+        self._show(target)
 
     def _show(self, index: Optional[int]) -> None:
         self._current = index
@@ -206,7 +213,6 @@ class StepEditor(tk.Toplevel):
             step.text = self._txt.get("1.0", "end-1c")
         self._list.delete(i)
         self._list.insert(i, self._label(i, step))
-        self._list.selection_set(i)
 
     def _move(self, delta: int) -> None:
         self._commit()
