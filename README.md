@@ -3,7 +3,7 @@
 Zeichnet Mausklicks und Texteingaben auf einem gewählten Monitor auf und erzeugt daraus
 eine Schritt-für-Schritt-Anleitung als Word-Datei (.docx) oder PDF mit markierten Screenshots.
 
-Hinweise: Die exe ist nicht signiert, Windows SmartScreen fragt beim ersten Start nach
+Hinweise: Die exe ist nicht signiert (siehe „Exe signieren“ unten), Windows SmartScreen fragt beim ersten Start nach
 („Weitere Informationen“ → „Trotzdem ausführen“). Da das Programm Tastatur und Maus mitliest,
 können Virenscanner einen Fehlalarm auslösen.
 
@@ -37,5 +37,9 @@ Hinweis: Die exe startet mit Administratorrechten (UAC-Abfrage beim Start). Nur 
 - Auf Nicht-Windows-Systemen ist der Schutz inaktiv.
 - Der Screenshot entsteht kurz nach dem Klick; ein dadurch geöffnetes Menü kann bereits sichtbar sein.
 
----
-Made by Lukas Dostal
+## Exe signieren (optional)
+Der Build signiert `ProcessRecorder.exe` automatisch, sobald im GitHub-Repo (Settings > Secrets and variables > Actions) zwei Secrets existieren:
+- `WINDOWS_CERT_PFX_BASE64`: das Code-Signing-Zertifikat als PFX, base64-kodiert (PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.pfx"))`)
+- `WINDOWS_CERT_PASSWORD`: das PFX-Passwort
+
+Ohne Secrets wird der Schritt übersprungen und die exe bleibt unsigniert. Die Signatur enthält einen RFC-3161-Zeitstempel (DigiCert). Ein Zertifikat muss bei einer Zertifizierungsstelle gekauft werden (OV/EV); SmartScreen-Warnungen verschwinden bei OV erst nach und nach, bei EV sofort.

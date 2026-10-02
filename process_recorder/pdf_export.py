@@ -19,9 +19,11 @@ from reportlab.platypus import (Image as RLImage, KeepTogether, Paragraph, Simpl
                                 Spacer, Table, TableStyle)
 
 from .exporter import IMAGE_WIDTH_CM, ZOOM_WIDTH_CM, prepare_images
-from .models import Step
+from .models import Step, clean_text
 
 log = logging.getLogger(__name__)
+
+CODE_LINE_CHARS = 90        # maximale Zeichen je Zeile im Textfeld "Eingegebener Text"
 
 _FONT_DIRS = [os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"),
               "/usr/share/fonts/truetype/dejavu", "/Library/Fonts"]
@@ -52,7 +54,7 @@ def _fonts():
 
 
 def _paragraph(text: str, style) -> Paragraph:
-    return Paragraph(escape(text).replace("\n", "<br/>"), style)
+    return Paragraph(escape(clean_text(text)).replace("\n", "<br/>"), style)
 
 
 def _image(buf, width_cm: float) -> RLImage:
@@ -68,6 +70,7 @@ def export_pdf(steps: Iterable[Step], output: Path, monitor_label: str = "",
                title: str = "", intro: str = "", zoom: bool = True) -> Path:
     """Erzeugt die Anleitung als PDF und gibt den Pfad zurück."""
     steps = list(steps)
+    title, intro, monitor_label = clean_text(title), clean_text(intro), clean_text(monitor_label)
     normal, bold, italic, mono = _fonts()
     base = getSampleStyleSheet()
     body = ParagraphStyle("body", parent=base["Normal"], fontName=normal, fontSize=10.5, leading=15)
@@ -78,7 +81,8 @@ def export_pdf(steps: Iterable[Step], output: Path, monitor_label: str = "",
                             textColor=colors.HexColor("#1F2340"), spaceBefore=14, spaceAfter=3)
     caption = ParagraphStyle("caption", parent=meta, alignment=TA_CENTER, fontSize=9)
     label = ParagraphStyle("label", parent=body, fontName=bold, fontSize=9.5)
-    code = ParagraphStyle("code", parent=body, fontName=mono, fontSize=10, leading=13)
+    code = ParagraphStyle("code", parent=body, fontName=mono, fontSize=10, leading=13,
+                          wordWrap="CJK")
 
     story = [_paragraph(title.strip() or "Prozessdokumentation", h_title)]
     if intro.strip():
@@ -108,8 +112,13 @@ def export_pdf(steps: Iterable[Step], output: Path, monitor_label: str = "",
             story.append(KeepTogether([Spacer(1, 4), _paragraph("Ausschnitt (vergrößert)", caption),
                                        _image(zoomed, ZOOM_WIDTH_CM)]))
         if step.kind == "text" and step.text:
-            box = Table([[_paragraph("Eingegebener Text zum Kopieren:", label)],
-                         [_paragraph(step.text, code)]], colWidths=[17 * cm])
+            # eine Zeile je Textzeile, damit die Tabelle über Seiten hinweg umbrechen kann
+            rows = [[_paragraph("Eingegebener Text zum Kopieren:", label)]]
+            # lange Zeichenketten ohne Leerzeichen hart umbrechen (sonst LayoutError)
+            rows += [[_paragraph(line[i:i + CODE_LINE_CHARS], code)]
+                     for line in clean_text(step.text).split("\n")
+                     for i in range(0, max(len(line), 1), CODE_LINE_CHARS)]
+            box = Table(rows, colWidths=[17 * cm])
             box.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F2F2F2")),
                                      ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#BBBBBB")),
                                      ("LEFTPADDING", (0, 0), (-1, -1), 8)]))
