@@ -1,5 +1,6 @@
 """Tests der Aufnahme-Logik mit simulierten Ereignissen (ohne echte Hooks/Screenshots)."""
 import sys
+from concurrent.futures import Future
 from types import SimpleNamespace
 
 import pytest
@@ -164,6 +165,60 @@ def test_double_click_is_merged_into_one_step(rec, monkeypatch, tmp_path):
     for ev in (ev1, ev2, ev3):
         rec._handle_event(None, ev)
     assert [(s.kind, s.clicks) for s in rec.steps] == [("click", 2), ("click", 1)]
+
+
+def test_text_is_merged_with_following_click_or_key(rec, monkeypatch, tmp_path):
+    monkeypatch.setattr(rec, "_grab", lambda sct, pending=None: tmp_path / "x.jpg")
+    for ev in (rec_mod._Event("text", 1.0, text="Bericht"),
+               rec_mod._Event("click", 1.1, x=200, y=300, button="left"),
+               rec_mod._Event("text", 2.0, text="Suche"),
+               rec_mod._Event("key", 2.1, text="Enter"),
+               rec_mod._Event("key", 3.0, text="Strg+S")):
+        rec._handle_event(None, ev)
+    assert [(s.kind, s.text, s.key) for s in rec.steps] \
+        == [("text", "Bericht", ""), ("text", "Suche", "Enter"), ("key", "Strg+S", "")]
+    assert rec.steps[0].click_rel == (200, 300)
+
+
+def _click(ts, x, target):
+    fut = Future()
+    fut.set_result(target)
+    return rec_mod._Event("click", ts, x=x, y=300, button="left", target=fut)
+
+
+def test_click_into_field_is_merged_with_typing(rec, monkeypatch, tmp_path):
+    monkeypatch.setattr(rec, "_grab", lambda sct, pending=None: tmp_path / "x.jpg")
+    for ev in (_click(1.0, 100, "Eingabefeld „Name“ – Editor"),
+               rec_mod._Event("text", 2.0, text="Max"),
+               _click(3.0, 500, "Schaltfläche „OK“ – Editor"),
+               _click(4.0, 600, "Eingabefeld ohne Beschriftung – Editor"),
+               rec_mod._Event("text", 5.0, text="frei")):
+        rec._handle_event(None, ev)
+    first, second, third = rec.steps
+    assert (first.kind, first.field, first.target, first.click_rel) \
+        == ("text", "Eingabefeld „Name“ – Editor", "Schaltfläche „OK“ – Editor", (500, 300))
+    assert first.switch_to == "Editor" and not second.switch_to
+    assert (second.kind, third.kind, third.field) == ("click", "text", None)   # unbeschriftet
+
+
+def test_dropdown_selection_is_one_step(rec, monkeypatch, tmp_path):
+    monkeypatch.setattr(rec, "_grab", lambda sct, pending=None: tmp_path / "x.jpg")
+    for ev in (_click(1.0, 100, "Auswahlfeld „Land“ – App"),
+               _click(2.0, 400, "Listeneintrag „Deutschland“ – App"),
+               _click(3.0, 700, "Listeneintrag „Österreich“ – App")):
+        rec._handle_event(None, ev)
+    assert [s.description() for s in rec.steps] == [
+        "Wechseln Sie zu „App“. Wählen Sie im Auswahlfeld „Land“ den Eintrag „Deutschland“ aus.",
+        "Klicken Sie auf den Listeneintrag „Österreich“."]
+
+
+def test_app_switch_is_noted_once_per_change(rec, monkeypatch, tmp_path):
+    monkeypatch.setattr(rec, "_grab", lambda sct, pending=None: tmp_path / "x.jpg")
+    for i, tgt in enumerate(["Schaltfläche „A“ – Word", "Schaltfläche „B“ – Word",
+                             "Schaltfläche „Word“ (in Taskleiste) – Datei-Explorer",
+                             "Schaltfläche „C“ – Excel"]):
+        rec._handle_event(None, _click(float(i * 5), i * 100, tgt))
+    assert [s.switch_to for s in rec.steps] == ["Word", "", "", "Excel"]
 
 
 def test_protected_steps_are_merged(rec):

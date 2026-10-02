@@ -75,6 +75,7 @@ KNOWN_IDS = {
 }
 MAX_NAME_LEN = 80
 STUCK_SECONDS = 1.5
+TOGGLE_SETTLE_SECONDS = 0.35   # Wartezeit, bis ein Kontrollkästchen umgeschaltet hat
 _TABS_SUFFIX = re.compile(r"\s+und\s+\d+\s+weitere\s+Registerkarten?\b.*$", re.IGNORECASE)
 _TITLE_SPLIT = re.compile(r"\s+[-–—]\s+")
 
@@ -208,6 +209,20 @@ def _context(control, top, name: str, window: str, type_name: str) -> str:
                      for t, n in found)
 
 
+def _toggle_state(control) -> Optional[bool]:
+    """Zustand eines Kontrollkästchens nach dem Klick (True = aktiviert, None = unbekannt).
+
+    Die Abfrage startet beim Drücken der Maustaste, das Häkchen wechselt aber erst beim
+    Loslassen – deshalb kurz warten.
+    """
+    time.sleep(TOGGLE_SETTLE_SECONDS)
+    with contextlib.suppress(Exception):
+        state = control.GetTogglePattern().ToggleState
+        if state in (0, 1):                      # 2 = unbestimmt
+            return bool(state)
+    return None
+
+
 def describe_point(auto, x: int, y: int) -> Optional[str]:
     """Beschreibung des Elements bei (x, y).
 
@@ -265,6 +280,10 @@ def describe_point(auto, x: int, y: int) -> Optional[str]:
     else:
         hint = _unlabeled_hint(control)
         text = f"{kind} ohne Beschriftung" + (f" ({hint})" if hint else "")
+    if type_name == "CheckBoxControl":
+        state = _toggle_state(control)
+        if state is not None:
+            text += " [aktiviert]" if state else " [deaktiviert]"
     if cell:
         text += f", Spalte „{cell}“"
     context = _context(control, top, name, window, type_name)

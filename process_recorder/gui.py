@@ -427,7 +427,7 @@ class App(tk.Tk):
         if editor.result is None:
             self._finish("Verworfen.")
             return
-        steps, title, intro = editor.result
+        steps, title, intro, outro = editor.result
 
         default = f"Anleitung_{datetime.now():%Y%m%d_%H%M%S}.docx"
         path = filedialog.asksaveasfilename(
@@ -447,7 +447,8 @@ class App(tk.Tk):
 
         def work() -> None:
             try:
-                export_document(steps, Path(path), label, title=title, intro=intro, zoom=zoom)
+                export_document(steps, Path(path), label, title=title, intro=intro,
+                                outro=outro, zoom=zoom)
             except Exception as exc:
                 log.exception("Export fehlgeschlagen")
                 result["error"] = exc

@@ -15,10 +15,10 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (Image as RLImage, KeepTogether, Paragraph, SimpleDocTemplate,
-                                Spacer, Table, TableStyle)
+from reportlab.platypus import (CondPageBreak, Image as RLImage, KeepTogether, Paragraph,
+                                SimpleDocTemplate, Spacer, Table, TableStyle)
 
-from .exporter import IMAGE_WIDTH_CM, ZOOM_WIDTH_CM, prepare_images
+from .exporter import IMAGE_WIDTH_CM, NOTE_FILLS, ZOOM_WIDTH_CM, prepare_images
 from .models import Step, clean_text
 
 log = logging.getLogger(__name__)
@@ -67,10 +67,11 @@ def _image(buf, width_cm: float) -> RLImage:
 
 
 def export_pdf(steps: Iterable[Step], output: Path, monitor_label: str = "",
-               title: str = "", intro: str = "", zoom: bool = True) -> Path:
+               title: str = "", intro: str = "", outro: str = "", zoom: bool = True) -> Path:
     """Erzeugt die Anleitung als PDF und gibt den Pfad zurück."""
     steps = list(steps)
     title, intro, monitor_label = clean_text(title), clean_text(intro), clean_text(monitor_label)
+    outro = clean_text(outro)
     normal, bold, italic, mono = _fonts()
     base = getSampleStyleSheet()
     body = ParagraphStyle("body", parent=base["Normal"], fontName=normal, fontSize=10.5, leading=15)
@@ -79,6 +80,8 @@ def export_pdf(steps: Iterable[Step], output: Path, monitor_label: str = "",
                              spaceAfter=8)
     h_step = ParagraphStyle("step", parent=body, fontName=bold, fontSize=13, leading=17,
                             textColor=colors.HexColor("#1F2340"), spaceBefore=14, spaceAfter=3)
+    h_section = ParagraphStyle("section", parent=h_step, fontSize=16, leading=20, spaceBefore=18,
+                               spaceAfter=2)
     caption = ParagraphStyle("caption", parent=meta, alignment=TA_CENTER, fontSize=9)
     label = ParagraphStyle("label", parent=body, fontName=bold, fontSize=9.5)
     code = ParagraphStyle("code", parent=body, fontName=mono, fontSize=10, leading=13,
@@ -94,16 +97,30 @@ def export_pdf(steps: Iterable[Step], output: Path, monitor_label: str = "",
     story.append(_paragraph(info, meta))
 
     images = prepare_images(steps, zoom)
+    def box(rows, fill):
+        table = Table(rows, colWidths=[17 * cm])
+        table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(fill)),
+                                   ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#BBBBBB")),
+                                   ("LEFTPADDING", (0, 0), (-1, -1), 8)]))
+        return table
+
+    def note(step):
+        if not step.note.strip():
+            return []
+        fill = "#" + NOTE_FILLS.get(step.note_kind, NOTE_FILLS["Hinweis"])
+        return [Spacer(1, 6), box([[_paragraph(f"{step.note_kind}:", label)],
+                                   [_paragraph(step.note.strip(), body)]], fill)]
+
     for number, (step, (image, zoomed)) in enumerate(zip(steps, images), start=1):
-        block = [_paragraph(f"Schritt {number}: {step.headline()}", h_step),
+        if step.section.strip():
+            story.append(CondPageBreak(6 * cm))
+            story.append(_paragraph(step.section.strip(), h_section))
+        block = [_paragraph(f"Schritt {number}", h_step),
                  _paragraph(step.text_for_export(), body), Spacer(1, 4)]
         if step.kind == "protected":
-            box = Table([[_paragraph("Hinweis: Dieser Bereich wurde bewusst nicht aufgezeichnet.",
-                                     body)]], colWidths=[17 * cm])
-            box.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF2CC")),
-                                     ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#BBBBBB")),
-                                     ("LEFTPADDING", (0, 0), (-1, -1), 8)]))
-            story.append(KeepTogether(block + [box]))
+            hint = box([[_paragraph("Hinweis: Dieser Bereich wurde bewusst nicht aufgezeichnet.",
+                                    body)]], "#FFF2CC")
+            story.append(KeepTogether(block + [hint] + note(step)))
             continue
         if image is not None:
             block.append(_image(image, IMAGE_WIDTH_CM))
@@ -118,11 +135,11 @@ def export_pdf(steps: Iterable[Step], output: Path, monitor_label: str = "",
             rows += [[_paragraph(line[i:i + CODE_LINE_CHARS], code)]
                      for line in clean_text(step.text).split("\n")
                      for i in range(0, max(len(line), 1), CODE_LINE_CHARS)]
-            box = Table(rows, colWidths=[17 * cm])
-            box.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F2F2F2")),
-                                     ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#BBBBBB")),
-                                     ("LEFTPADDING", (0, 0), (-1, -1), 8)]))
-            story += [Spacer(1, 4), box]
+            story += [Spacer(1, 4), box(rows, "#F2F2F2")]
+        story += note(step)
+
+    if outro.strip():
+        story += [_paragraph("Abschluss", h_section), _paragraph(outro.strip(), body)]
 
     output = Path(output)
     SimpleDocTemplate(str(output), pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm,

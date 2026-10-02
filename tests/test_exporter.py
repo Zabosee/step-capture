@@ -73,10 +73,10 @@ def test_export_docx_content(tmp_path, shot):
     texts = [p.text for p in doc.paragraphs]
     assert texts[0] == "Meine Anleitung" and "Einleitung" in texts
     headings = [p.text for p in doc.paragraphs if p.style.name == "Heading 2"]
-    assert headings[0] == "Schritt 1: Schaltfläche „OK“ anklicken"
-    assert headings[1] == "Schritt 2: Text eingeben"
-    assert headings[2] == "Schritt 3: Tastenkombination Strg+S drücken"
-    assert headings[3] == "Schritt 4: Geschützter Bereich"
+    assert headings == ["Schritt 1", "Schritt 2", "Schritt 3", "Schritt 4"]
+    assert "Klicken Sie auf die Schaltfläche „OK“." in texts
+    assert "Geben Sie den unten stehenden Text ein." in texts
+    assert "Drücken Sie die Tastenkombination Strg+S." in texts
     assert "Ausschnitt (vergrößert)" in texts
     assert any("Grüße Ölweg" in cell.text for t in doc.tables for row in t.rows for cell in row.cells)
     # 3 Screenshots + 1 Zoom (nur der Klick)
@@ -90,6 +90,20 @@ def test_export_docx_without_zoom_and_custom_text(tmp_path, shot):
     texts = [p.text for p in doc.paragraphs]
     assert "Auf OK klicken" in texts and "Ausschnitt (vergrößert)" not in texts
     assert len(doc.inline_shapes) == 3
+
+
+def test_sections_notes_and_outro_are_exported(tmp_path, shot):
+    steps = _steps(shot)
+    steps[0].section, steps[0].note, steps[0].note_kind = "Anmelden", "Vorher speichern!", "Warnung"
+    steps[3].note = "Admin fragen"
+    doc = Document(export_docx(steps, tmp_path / "s.docx", outro="Fertig."))
+    texts = [p.text for p in doc.paragraphs]
+    assert [p.text for p in doc.paragraphs if p.style.name == "Heading 1"] == ["Anmelden", "Abschluss"]
+    assert texts[-1] == "Fertig."
+    cells = [c.text for t in doc.tables for row in t.rows for c in row.cells]
+    assert "Warnung:\nVorher speichern!" in cells and "Hinweis:\nAdmin fragen" in cells
+    pdf = export_pdf(steps, tmp_path / "s.pdf", outro="Fertig.")
+    assert pdf.stat().st_size > 1000
 
 
 def test_export_docx_survives_missing_screenshot(tmp_path, shot):
