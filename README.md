@@ -16,12 +16,12 @@ können Virenscanner einen Fehlalarm auslösen.
    Optionsfelder, Registerkarten, Menüs und Auswahlfelder haben eigene Formulierungen, ein
    Programmwechsel wird vermerkt. Tastenkürzel (Strg+S …), Enter, Esc, Entf und F-Tasten sind
    eigene Schritte. Jeder Klick-Schritt bekommt einen Screenshot mit rotem Kreis.
-3. **Beenden & speichern** klicken. In der Vorschau lassen sich Schritte löschen, verschieben und
+3. **Aufnahme beenden** klicken. In der Vorschau lassen sich Schritte löschen, verschieben und
    beschriften, Abschnitte beginnen, Hinweise/Tipps/Warnungen zu Schritten ergänzen sowie Titel,
    Einleitung und Abschluss setzen. Danach Speicherort und Format (Word oder PDF) wählen.
 
 Tastenkürzel (global): **Strg+Alt+R** Start/Ende, **Strg+Alt+P** Pause/Fortsetzen. Die Option
-„Vergrößerten Ausschnitt um jeden Klick einfügen“ ergänzt unter dem Screenshot einen Zoom-Ausschnitt.
+„Zoom-Ausschnitt um jeden Klick einfügen“ ergänzt unter dem Screenshot einen Zoom-Ausschnitt.
 
 ## Entwicklung
 `python -m pip install -r requirements.txt pytest` und `python -m pytest` (Tests in `tests/`).

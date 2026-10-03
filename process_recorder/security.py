@@ -16,7 +16,6 @@ import os
 import sys
 import threading
 import time
-import contextlib
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +38,6 @@ if IS_WINDOWS:
 
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
 
     class _GUITHREADINFO(ctypes.Structure):
         _fields_ = [
@@ -64,20 +62,11 @@ if IS_WINDOWS:
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
     kernel32.QueryFullProcessImageNameW.argtypes = [
         wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
-    advapi32.OpenProcessToken.argtypes = [
-        wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
-    advapi32.GetTokenInformation.argtypes = [
-        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
-        ctypes.POINTER(wintypes.DWORD)]
-
     _GWL_STYLE = -16
     _ES_PASSWORD = 0x0020
     _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    _TOKEN_QUERY = 0x0008
-    _TOKEN_ELEVATION = 20
     _DESKTOP_SWITCHDESKTOP = 0x0100
 
     def _class_name(hwnd) -> str:
@@ -90,34 +79,17 @@ if IS_WINDOWS:
         user32.GetWindowTextW(hwnd, buf, 256)
         return buf.value
 
-    def _token_elevated(process_handle) -> "bool | None":
-        """True/False laut Token, None wenn nicht abfragbar."""
-        token = wintypes.HANDLE()
-        if not advapi32.OpenProcessToken(process_handle, _TOKEN_QUERY, ctypes.byref(token)):
-            return None
-        try:
-            elevation = wintypes.DWORD()
-            size = wintypes.DWORD()
-            if not advapi32.GetTokenInformation(
-                    token, _TOKEN_ELEVATION, ctypes.byref(elevation),
-                    ctypes.sizeof(elevation), ctypes.byref(size)):
-                return None
-            return bool(elevation.value)
-        finally:
-            kernel32.CloseHandle(token)
-
-    def _process_info(pid: int):
-        """(exe-Name klein geschrieben | None, elevated | None); (None, None) = kein Zugriff."""
+    def _process_name(pid: int) -> str:
+        """exe-Name klein geschrieben; leer, wenn kein Zugriff."""
         handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:
-            return None, None
+            return ""
         try:
             buf = ctypes.create_unicode_buffer(1024)
             size = wintypes.DWORD(1024)
-            name = None
             if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
-                name = os.path.basename(buf.value).lower()
-            return name, _token_elevated(handle)
+                return os.path.basename(buf.value).lower()
+            return ""
         finally:
             kernel32.CloseHandle(handle)
 
@@ -135,7 +107,6 @@ class SensitiveContextDetector:
 
     def __init__(self) -> None:
         self._own_pid = os.getpid()
-        self._uia = None
         self._uia_failed = False
         self._uia_thread: "threading.Thread | None" = None
         self._uia_lock = threading.Lock()
@@ -154,17 +125,18 @@ class SensitiveContextDetector:
             hwnd = user32.GetForegroundWindow()
             if not hwnd:
                 return False
-            if _class_name(hwnd).lower() in SENSITIVE_CLASSES:
-                self.reason = f"Fensterklasse {_class_name(hwnd)!r}"
+            cls, title = _class_name(hwnd), _window_text(hwnd)
+            if cls.lower() in SENSITIVE_CLASSES:
+                self.reason = f"Fensterklasse {cls!r}"
                 return True
-            if _window_text(hwnd).strip().lower() in SENSITIVE_TITLES:
-                self.reason = f"Fenstertitel {_window_text(hwnd)!r}"
+            if title.strip().lower() in SENSITIVE_TITLES:
+                self.reason = f"Fenstertitel {title!r}"
                 return True
 
             pid = wintypes.DWORD()
             tid = user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value and pid.value != self._own_pid:
-                name, _elevated = _process_info(pid.value)
+                name = _process_name(pid.value)
                 if name in SENSITIVE_PROCESSES:
                     self.reason = f"Prozess {name}"
                     return True
@@ -213,29 +185,19 @@ class SensitiveContextDetector:
     def _uia_loop(self) -> None:
         try:
             import uiautomation as auto
-            init = auto.UIAutomationInitializerInThread()
         except Exception:
-            init = contextlib.nullcontext()
-        with init:
-            while not self._uia_failed:
-                value = self._uia_password_focused()
+            log.warning("Paket 'uiautomation' nicht ladbar – Passwortfelder in Browsern/WPF "
+                        "werden nicht erkannt.", exc_info=True)
+            self._uia_failed = True
+            return
+        with auto.UIAutomationInitializerInThread():
+            while True:
+                try:
+                    control = auto.GetFocusedControl()
+                    value = bool(control is not None and control.Element.CurrentIsPassword)
+                except Exception:
+                    log.debug("UIA-Abfrage fehlgeschlagen", exc_info=True)
+                    value = False
                 with self._uia_lock:
                     self._uia_value, self._uia_stamp = value, time.monotonic()
                 time.sleep(0.1)
-
-    def _uia_password_focused(self) -> bool:
-        if not IS_WINDOWS or self._uia_failed:
-            return False
-        try:
-            if self._uia is None:
-                import uiautomation as auto  # COM wird im Poll-Thread initialisiert
-                self._uia = auto
-            control = self._uia.GetFocusedControl()
-            return bool(control is not None and control.Element.CurrentIsPassword)
-        except ImportError:
-            log.warning("Paket 'uiautomation' fehlt – Passwortfelder in Browsern/WPF "
-                        "werden nicht erkannt.")
-            self._uia_failed = True
-        except Exception:
-            log.debug("UIA-Abfrage fehlgeschlagen", exc_info=True)
-        return False

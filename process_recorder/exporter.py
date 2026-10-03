@@ -43,6 +43,13 @@ def mark_click(img: Image.Image, xy: Tuple[int, int]) -> Image.Image:
     return img
 
 
+def _jpeg(img: Image.Image, quality: int) -> io.BytesIO:
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality)
+    buf.seek(0)
+    return buf
+
+
 def _prepare_image(step: Step) -> Optional[io.BytesIO]:
     if not step.image_path or not Path(step.image_path).exists():
         return None
@@ -56,10 +63,7 @@ def _prepare_image(step: Step) -> Optional[io.BytesIO]:
             click = (round(click[0] * factor), round(click[1] * factor))
     if click:
         img = mark_click(img, click)
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=85)
-    buf.seek(0)
-    return buf
+    return _jpeg(img, 85)
 
 
 ZOOM_WIDTH_PX = 900         # Breite des vergrößerten Ausschnitts in der Datei
@@ -91,10 +95,7 @@ def _prepare_zoom(step: Step) -> Optional[io.BytesIO]:
         crop = crop.resize((ZOOM_WIDTH_PX, round(crop.height * factor)), Image.LANCZOS)
         click = (round(click[0] * factor), round(click[1] * factor))
     crop = mark_click(crop, click)
-    buf = io.BytesIO()
-    crop.save(buf, format="JPEG", quality=88)
-    buf.seek(0)
-    return buf
+    return _jpeg(crop, 88)
 
 
 def prepare_images(steps, zoom: bool = True):

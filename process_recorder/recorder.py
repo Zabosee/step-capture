@@ -1,7 +1,6 @@
 """Aufnahme-Logik: Maus-/Tastatur-Listener, Screenshots, Sicherheits-Filter."""
 from __future__ import annotations
 
-import contextlib
 import logging
 import queue
 import threading
@@ -74,11 +73,6 @@ class Recorder:
         self._running = False
 
     # ------------------------------------------------------------------ Status
-    @property
-    def paused(self) -> bool:
-        """True, solange ein geschützter Bereich aktiv oder manuell pausiert ist."""
-        return self._sensitive or self._manual_pause
-
     @property
     def protected(self) -> bool:
         """True, solange ein geschützter Bereich (UAC/Passwort) aktiv ist."""
@@ -177,20 +171,14 @@ class Recorder:
 
     def _security_loop(self) -> None:
         """Pollt regelmäßig (inkl. UI Automation) auf Admin-Fenster / Passwortfelder."""
-        try:
-            import uiautomation as auto
-            init = auto.UIAutomationInitializerInThread()
-        except Exception:
-            init = contextlib.nullcontext()
-        with init:
-            while not self._stop.is_set():
-                try:
-                    self._set_sensitive(self._detector.is_sensitive())
-                except Exception:
-                    log.exception("Sicherheitsüberwachung fehlgeschlagen")
-                    self._set_sensitive(True)    # fail-safe
-                self._poke.wait(POLL_INTERVAL)
-                self._poke.clear()
+        while not self._stop.is_set():
+            try:
+                self._set_sensitive(self._detector.is_sensitive())
+            except Exception:
+                log.exception("Sicherheitsüberwachung fehlgeschlagen")
+                self._set_sensitive(True)        # fail-safe
+            self._poke.wait(POLL_INTERVAL)
+            self._poke.clear()
 
     # -------------------------------------------------------------- Tastatur
     _MODIFIER_NAMES = {"ctrl", "ctrl_l", "ctrl_r", "alt", "alt_l", "alt_r", "alt_gr",
@@ -198,6 +186,10 @@ class Recorder:
 
     def _held(self, *names: str) -> bool:
         return any(n in self._modifiers for n in names)
+
+    def _ctrl(self) -> bool:
+        """Strg gedrückt (AltGr meldet Windows als Strg+Alt und zählt nicht)."""
+        return self._held("ctrl", "ctrl_l", "ctrl_r") and not self._held("alt_gr")
 
     @staticmethod
     def _key_label(key) -> Optional[str]:
@@ -217,7 +209,7 @@ class Recorder:
 
     def _combo_label(self, key_label: str) -> str:
         mods = []
-        if self._held("ctrl", "ctrl_l", "ctrl_r") and not self._held("alt_gr"):
+        if self._ctrl():
             mods.append("Strg")
         if self._held("alt", "alt_l"):
             mods.append("Alt")
@@ -251,7 +243,7 @@ class Recorder:
                 return
 
             label = self._key_label(key)
-            ctrl = self._held("ctrl", "ctrl_l", "ctrl_r") and not self._held("alt_gr")
+            ctrl = self._ctrl()
             alt = self._held("alt", "alt_l")
             win = self._held("cmd", "cmd_l", "cmd_r")
 
