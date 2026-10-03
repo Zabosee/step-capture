@@ -23,7 +23,6 @@ def rec(tmp_path):
     r = Recorder(MONITOR, tmp_path)
     r._detector.is_sensitive_fast = lambda: False          # keine echten Windows-Abfragen
     r._resolver.submit = lambda x, y: None                 # keine UI Automation
-    r._redactor.submit = lambda: None
     return r
 
 
@@ -148,7 +147,6 @@ def test_click_outside_monitor_and_inside_ignore_rect_are_skipped(tmp_path):
     r = Recorder(MONITOR, tmp_path, ignore_rect=lambda: (0, 0, 100, 100))
     r._detector.is_sensitive_fast = lambda: False
     r._resolver.submit = lambda x, y: None
-    r._redactor.submit = lambda: None
     r._on_click(50, 50, SimpleNamespace(name="left"), True)         # Recorder-Fenster
     r._on_click(5000, 50, SimpleNamespace(name="left"), True)       # anderer Monitor
     r._on_click(500, 500, SimpleNamespace(name="left"), False)      # Loslassen
@@ -242,31 +240,13 @@ def test_key_label_mapping():
     assert Recorder._key_label(Key.shift) is None
 
 
-def test_finish_redacts_backlog_before_closing_services(tmp_path, monkeypatch):
-    """Nach dem Stopp müssen noch wartende Schritte geschwärzt werden (Dienste erst in finish schließen)."""
+def test_finish_closes_services(tmp_path):
     r = Recorder(MONITOR, tmp_path)
     closed = []
-    r._redactor.close = lambda: closed.append("redactor")
     r._resolver.close = lambda: closed.append("resolver")
     r._running = True
     r.begin_stop()
     assert closed == []                                   # begin_stop schließt nichts
     r._queue.get_nowait()                                 # Ende-Marker entfernen: kein Worker läuft hier
     r.finish()
-    assert sorted(closed) == ["redactor", "resolver"]
-
-
-def test_grab_pixelates_when_redaction_search_impossible(rec):
-    from concurrent.futures import Future
-    from PIL import Image
-
-    class FakeSct:
-        def grab(self, mon):
-            return SimpleNamespace(size=(32, 32),
-                                   bgra=(bytes([0, 0, 0, 255]) + bytes([255, 255, 255, 255])) * 512)
-
-    rec._monitor = {"left": 0, "top": 0, "width": 32, "height": 32}
-    fut = Future()
-    fut.set_result(None)                      # Suche nicht möglich (Zeitüberschreitung/Fehler)
-    img = Image.open(rec._grab(FakeSct(), fut))
-    assert len({img.getpixel((x, 0)) for x in range(8)}) == 1
+    assert closed == ["resolver"]

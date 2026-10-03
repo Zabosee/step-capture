@@ -117,6 +117,17 @@ class RoundButton(tk.Canvas):
         self.create_text(w / 2, h / 2, text=self._text, fill=fg, font=(FONT, 11, "bold"))
 
 
+def _remove_stale_workdirs(max_age_hours: float = 24) -> None:
+    """Löscht Screenshot-Ordner abgestürzter Läufe, damit keine Bildschirminhalte liegen bleiben."""
+    cutoff = time.time() - max_age_hours * 3600
+    for d in Path(tempfile.gettempdir()).glob("process_recorder_*"):
+        try:
+            if d.is_dir() and d.stat().st_mtime < cutoff:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+
+
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -238,8 +249,6 @@ class App(tk.Tk):
         self._combo.pack(side="left", fill="x", expand=True)
         self._fill_monitors()
         self._zoom = self._check(inner, "Vergrößerten Ausschnitt um jeden Klick einfügen", True)
-        self._redact_var = self._check(inner, "Sensible Felder schwärzen (Passwörter, PIN, IBAN …)",
-                                       True)
         self._check(inner, "Fenster immer im Vordergrund", True, self._apply_topmost,
                     self._topmost)
 
@@ -354,6 +363,10 @@ class App(tk.Tk):
             else:
                 color = REC
                 text = f"Aufnahme läuft … {clock} · {rec.step_count} Schritte erfasst."
+                if rec.password_detection_failed:
+                    color = PAUSE
+                    text = ("ACHTUNG: Passwortfelder in Browsern werden nicht erkannt "
+                            "(UI Automation fehlt) – keine Passwörter eingeben! · " + text)
             if text != self._last_status:
                 self._last_status = text
                 self._status.set(text)
@@ -369,10 +382,10 @@ class App(tk.Tk):
             messagebox.showerror("Fehler", "Es wurde kein Bildschirm gefunden.")
             return
         monitor = self._monitors[self._combo.current()]
+        _remove_stale_workdirs()
         self._workdir = Path(tempfile.mkdtemp(prefix="process_recorder_"))
         try:
-            self._recorder = Recorder(monitor, self._workdir, lambda: self._window_rect,
-                                      redact=self._redact_var.get())
+            self._recorder = Recorder(monitor, self._workdir, lambda: self._window_rect)
             self._recorder.start()
         except Exception as exc:
             log.exception("Start fehlgeschlagen")
