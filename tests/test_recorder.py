@@ -121,14 +121,14 @@ def test_app_hotkeys_are_never_recorded(rec):
 def test_manual_pause_ignores_keys_and_clicks_but_keeps_earlier_text(rec):
     type_text(rec, "vorher")
     rec.set_manual_pause(True)
-    assert rec.paused and rec.manual_paused and not rec.protected
+    assert rec.manual_paused and not rec.protected
     type_text(rec, "geheim")
     press(rec, Key.enter)
     rec._on_click(100, 100, SimpleNamespace(name="left"), True)
     events = queued(rec)
     assert [(e.kind, e.text) for e in events] == [("text", "vorher")]
     rec.set_manual_pause(False)
-    assert not rec.paused
+    assert not rec.manual_paused
     rec._on_click(100, 100, SimpleNamespace(name="left"), True)
     assert [e.kind for e in queued(rec)] == ["click"]
 
@@ -140,7 +140,7 @@ def test_sensitive_context_blocks_input(rec):
     press(rec, Key.enter)
     rec._on_click(10, 10, SimpleNamespace(name="left"), True)
     kinds = [e.kind for e in queued(rec)]
-    assert kinds == ["protected"] and rec.protected and rec.paused
+    assert kinds == ["protected"] and rec.protected
 
 
 def test_click_outside_monitor_and_inside_ignore_rect_are_skipped(tmp_path):

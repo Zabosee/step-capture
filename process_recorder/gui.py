@@ -11,7 +11,6 @@ import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from tkinter import font as tkfont
 from typing import List, Optional
 
 import mss
@@ -25,16 +24,50 @@ from .security import IS_WINDOWS
 
 log = logging.getLogger(__name__)
 
-BG = "#F4F5FB"
-CARD = "#FFFFFF"
-TEXT = "#1F2340"
-MUTED = "#6B7086"
-BORDER = "#E3E5F0"
-GREEN, GREEN_H = "#16A34A", "#15803D"
-RED, RED_H = "#EF4444", "#DC2626"
-IDLE, REC, PAUSE = "#9CA3AF", "#EF4444", "#F59E0B"
-AMBER, AMBER_H = "#F59E0B", "#D97706"
+BG, SURFACE, TEXT, MUTED, BORDER = "#F5F6FA", "#FFFFFF", "#1F2340", "#5B6078", "#D5D8E6"
+ACCENT, DANGER, PAUSE = "#4F46E5", "#B91C1C", "#B45309"
 FONT = "Segoe UI"
+OFF = "#E6E8F0"      # Hintergrund deaktivierter Buttons
+
+
+def apply_theme(root: tk.Tk, px) -> None:
+    """Einheitliches ttk-Design (Farben/Schrift/Fokus) für alle Fenster."""
+    root.configure(bg=BG)
+    root.option_add("*Text.Font", f"{{{FONT}}} 10")   # nicht *Font: überschreibt ttk-Styles
+    root.tk.call("font", "configure", "TkDefaultFont", "-family", FONT, "-size", 10)
+    for w in ("Text", "Listbox"):
+        root.option_add(f"*{w}.relief", "flat")
+        root.option_add(f"*{w}.highlightThickness", 1)
+        root.option_add(f"*{w}.highlightBackground", BORDER)
+        root.option_add(f"*{w}.highlightColor", ACCENT)
+    root.option_add("*Listbox.selectBackground", ACCENT)
+    root.option_add("*Listbox.selectForeground", "white")
+    s = ttk.Style(root)
+    s.theme_use("clam")
+    s.configure(".", background=BG, foreground=TEXT, font=(FONT, 10), bordercolor=BORDER,
+                focuscolor=ACCENT)
+    s.configure("Card.TFrame", background=SURFACE)
+    s.configure("Muted.TLabel", foreground=MUTED, font=(FONT, 9))
+    s.configure("Title.TLabel", font=(FONT, 16, "bold"))
+    s.configure("Warn.TLabel", foreground=DANGER, font=(FONT, 9, "bold"))
+    s.configure("Card.TLabel", background=SURFACE)
+    s.configure("TButton", padding=(px(14), px(8)), relief="flat", background=BORDER,
+                borderwidth=2)
+    s.map("TButton", background=[("disabled", OFF), ("active", "#C7CBDD")],
+          foreground=[("disabled", MUTED)], bordercolor=[("focus", ACCENT), ("disabled", BORDER)])
+    for name, bg, active in (("Primary", ACCENT, "#4338CA"), ("Danger", DANGER, "#991B1B")):
+        s.configure(f"{name}.TButton", background=bg, foreground="white", font=(FONT, 10, "bold"))
+        s.map(f"{name}.TButton", background=[("disabled", OFF), ("active", active)],
+              foreground=[("disabled", MUTED), ("!disabled", "white")],
+              bordercolor=[("focus", TEXT), ("disabled", BORDER)])
+    for name in ("TCheckbutton", "Card.TCheckbutton"):
+        s.configure(name, background=SURFACE if name[0] == "C" else BG, indicatorbackground="white")
+        s.map(name, indicatorbackground=[("selected", ACCENT)], bordercolor=[("focus", ACCENT)])
+    s.configure("TCombobox", fieldbackground="white", background=BORDER, arrowcolor=TEXT)
+    s.configure("TEntry", fieldbackground="white")
+    s.map("TCombobox", bordercolor=[("focus", ACCENT)], fieldbackground=[("readonly", "white")])
+    s.map("TEntry", bordercolor=[("focus", ACCENT)])
+    s.configure("TProgressbar", troughcolor=BORDER, background=ACCENT)
 
 
 def list_monitors() -> List[dict]:
@@ -45,76 +78,6 @@ def list_monitors() -> List[dict]:
 
 def monitor_label(index: int, m: dict) -> str:
     return f"Monitor {index}: {m['width']}×{m['height']} (Position {m['left']}, {m['top']})"
-
-
-class RoundButton(tk.Canvas):
-    """Flacher Button mit runden Ecken, Hover-Effekt und Deaktiviert-Zustand."""
-
-    def __init__(self, master, text, color, hover, command, width, height, scale) -> None:
-        # Breite mindestens so groß, dass der Text (auch bei anderer Schriftgröße) passt
-        width = max(width, tkfont.Font(family=FONT, size=11, weight="bold").measure(text)
-                    + int(28 * scale))
-        super().__init__(master, width=width, height=height, bg=master["bg"],
-                         highlightthickness=0, bd=0, cursor="hand2", takefocus=True)
-        self._text, self._color, self._hover, self._command = text, color, hover, command
-        self._bw, self._bh, self._br = width, height, int(12 * scale)
-        self._state = "normal"
-        self._over = False
-        self._focus = False
-        self.bind("<FocusIn>", lambda _e: self._set_focus(True))
-        self.bind("<FocusOut>", lambda _e: self._set_focus(False))
-        self.bind("<space>", lambda _e: self._invoke())
-        self.bind("<Return>", lambda _e: self._invoke())
-        self.bind("<Enter>", lambda _e: self._set_over(True))
-        self.bind("<Leave>", lambda _e: self._set_over(False))
-        self.bind("<ButtonRelease-1>", self._click)
-        self._draw()
-
-    def set_text(self, text: str) -> None:
-        self._text = text
-        self._draw()
-
-    def _set_focus(self, value: bool) -> None:
-        self._focus = value
-        self._draw()
-
-    def _invoke(self) -> None:
-        if self._state == "normal":
-            self._command()
-
-    def _set_over(self, value: bool) -> None:
-        self._over = value
-        self._draw()
-
-    def _click(self, event) -> None:
-        if self._state == "normal" and 0 <= event.x <= self._bw and 0 <= event.y <= self._bh:
-            self._command()
-
-    def configure(self, cnf=None, **kw):
-        if "state" in kw:
-            self._state = kw.pop("state")
-            super().configure(cursor="hand2" if self._state == "normal" else "arrow",
-                              takefocus=self._state == "normal")
-            self._draw()
-        if cnf or kw:
-            return super().configure(cnf, **kw)
-
-    config = configure
-
-    def _draw(self) -> None:
-        self.delete("all")
-        enabled = self._state == "normal"
-        fill = (self._hover if self._over else self._color) if enabled else "#E5E7EB"
-        fg = "white" if enabled else "#9CA3AF"
-        w, h, r = self._bw, self._bh, self._br
-        for x0, y0, x1, y1, start in ((0, 0, 2 * r, 2 * r, 90), (w - 2 * r, 0, w, 2 * r, 0),
-                                       (0, h - 2 * r, 2 * r, h, 180), (w - 2 * r, h - 2 * r, w, h, 270)):
-            self.create_arc(x0, y0, x1, y1, start=start, extent=90, fill=fill, outline=fill)
-        self.create_rectangle(r, 0, w - r, h, fill=fill, outline=fill)
-        self.create_rectangle(0, r, w, h - r, fill=fill, outline=fill)
-        if self._focus and enabled:
-            self.create_rectangle(4, 4, w - 4, h - 4, outline="white", dash=(2, 2))
-        self.create_text(w / 2, h / 2, text=self._text, fill=fg, font=(FONT, 11, "bold"))
 
 
 def _remove_stale_workdirs(max_age_hours: float = 24) -> None:
@@ -132,7 +95,6 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"Process Recorder {__version__}")
-        self.configure(bg=BG)
         self.resizable(True, False)
         self._topmost = tk.BooleanVar(value=True)
         self.attributes("-topmost", True)
@@ -154,6 +116,7 @@ class App(tk.Tk):
 
         self._hotkey_queue: "queue.Queue[str]" = queue.Queue()
         self._hotkeys = None
+        apply_theme(self, self._px)
         self._build_ui()
         self.update_idletasks()
         self.minsize(self.winfo_reqwidth(), self.winfo_reqheight())
@@ -200,7 +163,7 @@ class App(tk.Tk):
             if action == "toggle":
                 if self._recorder is not None:
                     self._stop()
-                elif str(self._start_btn._state) == "normal":
+                elif self._start_btn.instate(["!disabled"]):
                     self._start()
             elif action == "pause" and self._recorder is not None:
                 self._toggle_pause()
@@ -210,7 +173,7 @@ class App(tk.Tk):
         if rec is None:
             return
         rec.set_manual_pause(not rec.manual_paused)
-        self._pause_btn.set_text("►  Fortsetzen" if rec.manual_paused else "‖  Pause")
+        self._pause_btn.configure(text="Fortsetzen" if rec.manual_paused else "Pause")
 
     def _px(self, v: int) -> int:
         return int(v * self._scale)
@@ -218,93 +181,71 @@ class App(tk.Tk):
     # ---------------------------------------------------------------- UI
     def _build_ui(self) -> None:
         px = self._px
-        root = tk.Frame(self, bg=BG)
-        root.pack(padx=px(22), pady=px(20), fill="both", expand=True)
+        root = ttk.Frame(self, padding=px(20))
+        root.pack(fill="both", expand=True)
 
-        # Kopf: Logo + Titel
-        head = tk.Frame(root, bg=BG)
+        head = ttk.Frame(root)
         head.pack(fill="x")
-        tk.Label(head, image=self._logo_small, bg=BG).pack(side="left")
-        titles = tk.Frame(head, bg=BG)
-        titles.pack(side="left", padx=(px(14), 0))
-        tk.Label(titles, text="Process Recorder", bg=BG, fg=TEXT,
-                 font=(FONT, 17, "bold")).pack(anchor="w")
-        tk.Label(titles, text="Klicks & Eingaben automatisch als Anleitung festhalten",
-                 bg=BG, fg=MUTED, font=(FONT, 9)).pack(anchor="w")
+        ttk.Label(head, image=self._logo_small).pack(side="left")
+        titles = ttk.Frame(head)
+        titles.pack(side="left", padx=(px(16), 0))
+        ttk.Label(titles, text="Process Recorder", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(titles, text="Klicks und Eingaben als Anleitung festhalten",
+                  style="Muted.TLabel").pack(anchor="w")
 
-        # Karte: Monitor-Auswahl
-        card = tk.Frame(root, bg=CARD, highlightthickness=1, highlightbackground=BORDER)
-        card.pack(fill="x", pady=(px(18), 0))
-        inner = tk.Frame(card, bg=CARD)
-        inner.pack(fill="x", padx=px(16), pady=px(14))
-        tk.Label(inner, text="BILDSCHIRM", bg=CARD, fg=MUTED,
-                 font=(FONT, 8, "bold")).pack(anchor="w")
-        row = tk.Frame(inner, bg=CARD)
-        row.pack(fill="x", pady=(px(6), 0))
-        self._combo = ttk.Combobox(row, state="readonly", width=46, font=(FONT, 10))
-        self._refresh_btn = tk.Button(row, text="↻", command=self._refresh_monitors, bd=0,
-                                      bg=CARD, activebackground=BORDER, fg=TEXT, cursor="hand2",
-                                      font=(FONT, 11), highlightthickness=0, padx=px(8))
-        self._refresh_btn.pack(side="right", padx=(px(6), 0))
+        card = ttk.Frame(root, style="Card.TFrame", padding=px(16))
+        card.pack(fill="x", pady=(px(20), 0))
+        ttk.Label(card, text="Bildschirm", style="Card.TLabel").pack(anchor="w")
+        row = ttk.Frame(card, style="Card.TFrame")
+        row.pack(fill="x", pady=(px(8), 0))
+        self._combo = ttk.Combobox(row, state="readonly", width=46)
+        self._refresh_btn = ttk.Button(row, text="Aktualisieren", command=self._refresh_monitors)
+        self._refresh_btn.pack(side="right", padx=(px(8), 0))
         self._combo.pack(side="left", fill="x", expand=True)
         self._fill_monitors()
-        self._zoom = self._check(inner, "Vergrößerten Ausschnitt um jeden Klick einfügen", True)
-        self._check(inner, "Fenster immer im Vordergrund", True, self._apply_topmost,
-                    self._topmost)
+        self._zoom = tk.BooleanVar(value=True)
+        for text, var, cmd in (("Zoom-Ausschnitt um jeden Klick einfügen", self._zoom, None),
+                               ("Fenster immer im Vordergrund", self._topmost, self._apply_topmost)):
+            ttk.Checkbutton(card, text=text, variable=var, command=cmd,
+                            style="Card.TCheckbutton").pack(anchor="w", pady=(px(8), 0))
 
-        # Buttons
-        bw = px(190)
-        buttons = tk.Frame(root, bg=BG)
+        buttons = ttk.Frame(root)
         buttons.pack(fill="x", pady=(px(16), 0))
-        self._start_btn = RoundButton(buttons, "●  Aufnahme starten", GREEN, GREEN_H,
-                                      self._start, bw, px(46), self._scale)
-        self._stop_btn = RoundButton(buttons, "■  Beenden & speichern", RED, RED_H,
-                                     self._stop, bw, px(46), self._scale)
-        self._start_btn.pack(side="left")
-        self._stop_btn.pack(side="right")
-        self._stop_btn.configure(state="disabled")
+        buttons.columnconfigure((0, 1, 2), weight=1, uniform="btn")
+        self._start_btn = ttk.Button(buttons, text="Aufnahme starten", style="Primary.TButton",
+                                     command=self._start)
+        self._pause_btn = ttk.Button(buttons, text="Pause", command=self._toggle_pause,
+                                     state="disabled")
+        self._stop_btn = ttk.Button(buttons, text="Aufnahme beenden", style="Danger.TButton",
+                                    command=self._stop, state="disabled")
+        for col, btn in enumerate((self._start_btn, self._pause_btn, self._stop_btn)):
+            btn.grid(row=0, column=col, sticky="ew", padx=px(4))
 
-        self._pause_btn = RoundButton(root, "‖  Pause", AMBER, AMBER_H, self._toggle_pause,
-                                      2 * bw, px(38), self._scale)
-        self._pause_btn.pack(pady=(px(10), 0))
-        self._pause_btn.configure(state="disabled")
-
-        # Statuszeile mit farbigem Punkt
-        status = tk.Frame(root, bg=BG)
-        status.pack(fill="x", pady=(px(16), 0))
-        self._dot = tk.Canvas(status, width=px(12), height=px(12), bg=BG,
-                              highlightthickness=0, bd=0)
-        self._dot_item = self._dot.create_oval(1, 1, px(11), px(11), fill=IDLE, outline=IDLE)
+        self._status_row = ttk.Frame(root)
+        self._status_row.pack(fill="x", pady=(px(16), 0))
+        self._dot = tk.Canvas(self._status_row, width=px(12), height=px(12), bg=BG,
+                              highlightthickness=0)
+        self._dot_item = self._dot.create_oval(1, 1, px(11), px(11), fill=MUTED, outline=MUTED)
         self._dot.pack(side="left", anchor="n", pady=(px(4), 0))
         self._status = tk.StringVar(value="Bereit.")
-        self._status_label = tk.Label(status, textvariable=self._status, bg=BG, fg=TEXT,
-                                      font=(FONT, 10), justify="left")
+        self._status_label = ttk.Label(self._status_row, textvariable=self._status)
         self._status_label.pack(side="left", padx=(px(8), 0))
         self._progress = ttk.Progressbar(root, mode="indeterminate")
 
-        hint = (f"Strg+Alt+{HOTKEY_TOGGLE.upper()}: Start/Ende · "
-                f"Strg+Alt+{HOTKEY_PAUSE.upper()}: Pause/Fortsetzen\n"
-                "Tipp: Fenster auf einen anderen Monitor schieben, sonst ist es auf den "
-                "Screenshots sichtbar (Klicks darauf werden ignoriert).")
-        self._hints = [tk.Label(root, text=hint, bg=BG, fg=MUTED, font=(FONT, 9),
-                                justify="left")]
+        self._hints = [ttk.Label(
+            root, style="Muted.TLabel",
+            text=f"Kürzel: Strg+Alt+{HOTKEY_TOGGLE.upper()} Start/Ende, "
+                 f"Strg+Alt+{HOTKEY_PAUSE.upper()} Pause\n"
+                 "Tipp: Fenster auf einen anderen Monitor schieben, sonst erscheint es auf den "
+                 "Screenshots.")]
         if not IS_WINDOWS:
-            self._hints.append(tk.Label(
-                root, text="Achtung: Der Schutz für UAC-/Admin-Fenster und Passwortfelder ist "
-                           "nur unter Windows aktiv!", bg=BG, fg=RED, font=(FONT, 9, "bold"),
-                justify="left"))
+            self._hints.append(ttk.Label(
+                root, style="Warn.TLabel", text="Achtung: Der Schutz für UAC-/Admin-Fenster und "
+                                                "Passwortfelder ist nur unter Windows aktiv!"))
         for lbl in self._hints:
-            lbl.pack(anchor="w", pady=(px(10), 0))
-        tk.Label(root, text=f"Version {__version__}", bg=BG, fg="#A0A4B8",
-                 font=(FONT, 8)).pack(anchor="e", pady=(px(10), 0))
-
-    def _check(self, parent, text, value, command=None, variable=None) -> tk.BooleanVar:
-        var = variable or tk.BooleanVar(value=value)
-        tk.Checkbutton(parent, text=text, variable=var, command=command, bg=CARD, fg=TEXT,
-                       activebackground=CARD, activeforeground=TEXT, selectcolor=CARD,
-                       font=(FONT, 9), anchor="w", bd=0, highlightthickness=0
-                       ).pack(fill="x", pady=(self._px(8), 0))
-        return var
+            lbl.pack(anchor="w", pady=(px(8), 0))
+        ttk.Label(root, text=f"Version {__version__}", style="Muted.TLabel").pack(
+            anchor="e", pady=(px(8), 0))
 
     def _apply_topmost(self) -> None:
         self.attributes("-topmost", self._topmost.get())
@@ -323,7 +264,7 @@ class App(tk.Tk):
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         if busy:
-            self._progress.pack(fill="x", pady=(self._px(8), 0), after=self._status_label.master)
+            self._progress.pack(fill="x", pady=(self._px(8), 0), after=self._status_row)
             self._progress.start(12)
         else:
             self._progress.stop()
@@ -348,7 +289,7 @@ class App(tk.Tk):
 
     def _tick(self) -> None:
         rec = self._recorder
-        color = IDLE
+        color = MUTED
         if rec is not None:
             secs = int(time.monotonic() - self._started)
             clock = f"{secs // 60:02d}:{secs % 60:02d}"
@@ -361,8 +302,8 @@ class App(tk.Tk):
                 text = ("Geschützter Bereich erkannt – Aufnahme pausiert "
                         f"({rec.step_count} Schritte bisher).")
             else:
-                color = REC
-                text = f"Aufnahme läuft … {clock} · {rec.step_count} Schritte erfasst."
+                color = DANGER
+                text = f"Aufnahme läuft · {clock} · {rec.step_count} Schritte"
                 if rec.password_detection_failed:
                     color = PAUSE
                     text = ("ACHTUNG: Passwortfelder in Browsern werden nicht erkannt "
@@ -398,14 +339,14 @@ class App(tk.Tk):
         self._refresh_btn.configure(state="disabled")
         self._start_btn.configure(state="disabled")
         self._stop_btn.configure(state="normal")
-        self._pause_btn.set_text("‖  Pause")
+        self._pause_btn.configure(text="Pause")
         self._pause_btn.configure(state="normal")
 
     def _stop(self) -> None:
         rec, self._recorder = self._recorder, None
         self._stop_btn.configure(state="disabled")
         self._pause_btn.configure(state="disabled")
-        self._status.set("Aufnahme beendet – Vorschau wird vorbereitet …")
+        self._status.set("Vorschau wird vorbereitet …")
         self._set_busy(True)
         self.update_idletasks()
         if rec:
@@ -438,7 +379,7 @@ class App(tk.Tk):
         editor = StepEditor(self, steps, self._scale)
         self.wait_window(editor)
         if editor.result is None:
-            self._finish("Verworfen.")
+            self._finish("Aufnahme verworfen.")
             return
         steps, title, intro, outro = editor.result
 
@@ -449,7 +390,7 @@ class App(tk.Tk):
         if not path:
             if messagebox.askyesno("Verwerfen?", "Ohne Speichern gehen alle Schritte verloren. "
                                                  "Wirklich verwerfen?"):
-                self._finish("Verworfen.")
+                self._finish("Aufnahme verworfen.")
                 return
             path = str(Path.home() / default)
 

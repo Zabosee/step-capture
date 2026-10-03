@@ -9,15 +9,14 @@ import contextlib
 import logging
 import queue
 import re
-import sys
 import threading
 import time
 from concurrent.futures import Future
 from typing import Optional, Tuple
 
-log = logging.getLogger(__name__)
+from .security import IS_WINDOWS
 
-IS_WINDOWS = sys.platform == "win32"
+log = logging.getLogger(__name__)
 
 TYPE_NAMES = {
     "ButtonControl": "Schaltfläche", "EditControl": "Eingabefeld",
@@ -87,11 +86,8 @@ def _clip(text: str) -> str:
 
 def _app_name(pid: int) -> str:
     """Anzeigename des Programms zum Prozess (z. B. „Datei-Explorer“)."""
-    try:
-        from .security import _process_info
-        exe, _ = _process_info(pid)
-    except Exception:
-        exe = None
+    from .security import _process_name     # nur unter Windows vorhanden
+    exe = _process_name(pid)
     if not exe:
         return ""
     if exe in APP_NAMES:
@@ -162,7 +158,7 @@ def _unlabeled_hint(control) -> str:
     """Hinweis für Elemente ohne Namen: Bezug zu Nachbarn/Eltern oder technische ID."""
     with contextlib.suppress(Exception):
         if control.AutomationId in KNOWN_IDS:
-            return f"{KNOWN_IDS[control.AutomationId]}"
+            return KNOWN_IDS[control.AutomationId]
     parent = control
     for _ in range(3):
         with contextlib.suppress(Exception):

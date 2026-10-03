@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 from xml.sax.saxutils import escape
 
+from PIL import Image
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
@@ -58,7 +59,6 @@ def _paragraph(text: str, style) -> Paragraph:
 
 
 def _image(buf, width_cm: float) -> RLImage:
-    from PIL import Image
     with Image.open(buf) as im:
         w, h = im.size
     buf.seek(0)
