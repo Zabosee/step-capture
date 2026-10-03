@@ -31,6 +31,10 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, handlers=handlers,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     _enable_dpi_awareness()
+    try:                                    # comtypes-Cache einmal im Hauptthread erzeugen; parallele
+        import uiautomation  # noqa: F401   # Imports in den Worker-Threads scheitern sonst beim Erststart
+    except Exception:
+        pass
     from process_recorder.gui import App
     App().mainloop()
 

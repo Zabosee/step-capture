@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from .models import Step, app_of, element_kind, element_name
-from .redaction import RedactionFinder, pixelate_image, redact_image, to_image_rects
 from .security import SensitiveContextDetector
 from .target import TargetResolver
 
@@ -46,19 +45,16 @@ class _Event:
     text: str = ""
     capture: bool = True         # False: kein Screenshot (sensibler Kontext)
     target: Optional[Future] = None   # Klickziel (UI Automation), wird im Hintergrund ermittelt
-    redact: Optional[Future] = None   # Suche nach sensiblen Feldern, gestartet beim Ereignis
 
 
 class Recorder:
     """Zeichnet Klicks und Texteingaben eines Monitors als Liste von :class:`Step` auf."""
 
     def __init__(self, monitor: dict, workdir: Path,
-                 ignore_rect: Optional[Callable[[], Optional[Rect]]] = None,
-                 redact: bool = True) -> None:
+                 ignore_rect: Optional[Callable[[], Optional[Rect]]] = None) -> None:
         self._monitor = dict(monitor)
         self._workdir = Path(workdir)
         self._ignore_rect = ignore_rect          # z. B. Fenster des Recorders selbst
-        self.redact = redact                     # sensible Felder in Screenshots schwärzen
 
         self.steps: List[Step] = []              # wird nur vom Worker-Thread beschrieben
         self._last_app = ""                       # Programm des letzten Klicks
@@ -73,7 +69,6 @@ class Recorder:
         self._poke = threading.Event()
         self._detector = SensitiveContextDetector()
         self._resolver = TargetResolver()
-        self._redactor = RedactionFinder()
         self._threads: List[threading.Thread] = []
         self._listeners: list = []
         self._running = False
@@ -103,6 +98,11 @@ class Recorder:
         log.info("Aufnahme %s (manuell)", "pausiert" if value else "fortgesetzt")
 
     @property
+    def password_detection_failed(self) -> bool:
+        """True, wenn UI Automation fehlt: Passwortfelder in Browsern/WPF werden dann nicht erkannt."""
+        return self._detector._uia_failed
+
+    @property
     def step_count(self) -> int:
         return len(self.steps)
 
@@ -115,7 +115,6 @@ class Recorder:
         self._running = True
         self._stop.clear()
         self._workdir.mkdir(parents=True, exist_ok=True)
-        self._submit_redact()                    # Aufwärmen: erste UIA-Suche ist deutlich langsamer
 
         for target in (self._capture_worker, self._security_loop):
             t = threading.Thread(target=target, daemon=True)
@@ -147,7 +146,6 @@ class Recorder:
             t.join(timeout=30)
         # Erst jetzt schließen: der Worker braucht beide Dienste, bis die Warteschlange leer ist
         self._resolver.close()
-        self._redactor.close()
         return list(self.steps)
 
     def stop(self) -> List[Step]:
@@ -259,14 +257,12 @@ class Recorder:
 
             if (ctrl or alt or win) and label:
                 self._flush_text()               # Kürzel beendet die laufende Texteingabe
-                self._queue.put(_Event("key", time.time(), text=self._combo_label(label),
-                                       redact=self._submit_redact()))
+                self._queue.put(_Event("key", time.time(), text=self._combo_label(label)))
             elif name == "tab":
                 self._flush_text()
             elif name in ("enter", "esc", "delete") or (name and name[0] == "f" and name[1:].isdigit()):
                 self._flush_text()
-                self._queue.put(_Event("key", time.time(), text=label,
-                                       redact=self._submit_redact()))
+                self._queue.put(_Event("key", time.time(), text=label))
             elif name == "backspace":
                 with self._lock:
                     if self._buffer:
@@ -295,7 +291,7 @@ class Recorder:
             if self._sensitive:
                 return
         if text.strip():
-            self._queue.put(_Event("text", time.time(), text=text, redact=self._submit_redact()))
+            self._queue.put(_Event("text", time.time(), text=text))
 
     # ------------------------------------------------------------------ Maus
     def _on_click(self, x, y, button, pressed) -> None:
@@ -316,8 +312,7 @@ class Recorder:
             self._flush_text()                    # Text endet mit dem Klick
             self._queue.put(_Event("click", time.time(), x=int(x), y=int(y),
                                    button=getattr(button, "name", "left"),
-                                   target=self._resolver.submit(int(x), int(y)),
-                                   redact=self._submit_redact()))
+                                   target=self._resolver.submit(int(x), int(y))))
         except Exception:
             log.exception("Fehler im Maus-Callback")
 
@@ -361,7 +356,7 @@ class Recorder:
                 last.clicks += 1                  # Doppelklick statt zweitem Schritt
                 last.timestamp = ev.ts
                 return
-            path = self._grab(sct, ev.redact)
+            path = self._grab(sct)
             target = self._target_text(ev)
             if self._open_text(last):             # „Text eingeben und auf … klicken“
                 last.timestamp, last.image_path, last.click_rel = ev.ts, path, rel
@@ -382,14 +377,14 @@ class Recorder:
                 self._last_app = app
             self.steps.append(step)
         elif ev.kind == "key":
-            path = self._grab(sct, ev.redact)
+            path = self._grab(sct)
             last = self.steps[-1] if self.steps else None
             if self._open_text(last):             # „Text eingeben und Enter drücken“
                 last.timestamp, last.image_path, last.key = ev.ts, path, ev.text
                 return
             self.steps.append(Step("key", ev.ts, image_path=path, text=ev.text))
         elif ev.kind == "text":
-            path = self._grab(sct, ev.redact) if ev.capture else None
+            path = self._grab(sct) if ev.capture else None
             last = self.steps[-1] if self.steps else None
             if any(self._plain_click(last, kind) for kind in TEXT_FIELDS) \
                     and element_name(last.target):
@@ -421,28 +416,11 @@ class Recorder:
         except Exception:                         # Timeout oder Fehler: Schritt ohne Ziel
             return None
 
-    def _submit_redact(self) -> Optional[Future]:
-        """Startet die Suche nach sensiblen Feldern schon beim Ereignis (nicht erst im Worker)."""
-        return self._redactor.submit() if self.redact else None
-
-    def _grab(self, sct, pending: Optional[Future] = None) -> Path:
+    def _grab(self, sct) -> Path:
         from PIL import Image
 
-        # Feldsuche (UI Automation, eigener Thread) läuft parallel zur Aufnahme
-        if pending is None:
-            pending = self._submit_redact()
         shot = sct.grab(self._monitor)
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-        if pending is not None:
-            try:
-                screen_rects = self._redactor.result(pending)
-                if screen_rects is None:          # Suche nicht möglich: lieber alles unkenntlich
-                    img = pixelate_image(img)
-                elif screen_rects:
-                    redact_image(img, to_image_rects(screen_rects, self._monitor, img.size))
-            except Exception:
-                log.exception("Schwärzen fehlgeschlagen – Screenshot wird verpixelt")
-                img = pixelate_image(img)
         path = self._workdir / f"step_{len(self.steps):04d}.jpg"
         img.save(path, quality=88)
         return path
