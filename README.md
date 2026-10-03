@@ -1,50 +1,72 @@
 # Process Recorder
 
-Zeichnet Mausklicks und Texteingaben auf einem gewählten Monitor auf und erzeugt daraus
-eine Schritt-für-Schritt-Anleitung als Word-Datei (.docx) oder PDF mit markierten Screenshots.
+Windows-Tool, das Mausklicks und Texteingaben aufzeichnet und daraus automatisch eine
+Schritt-für-Schritt-Anleitung als Word-Datei (.docx) oder PDF erstellt, inklusive Screenshots mit
+markierter Klickstelle.
 
-Hinweise: Die exe ist nicht signiert (siehe „Exe signieren“ unten), Windows SmartScreen fragt beim ersten Start nach
-(„Weitere Informationen“ → „Trotzdem ausführen“). Da das Programm Tastatur und Maus mitliest,
-können Virenscanner einen Fehlalarm auslösen.
+## Funktionen
+- Aufnahme auf einem frei wählbaren Monitor
+- Jeder Schritt wird als kurze Handlungsanweisung formuliert, z. B. „Klicken Sie auf die
+  Schaltfläche „Speichern“.“
+- Zusammengehörige Aktionen (Feld anklicken, Text tippen, bestätigen) werden zu einem Schritt zusammengefasst
+- Eigene Formulierungen für Kontrollkästchen, Optionsfelder, Registerkarten, Menüs und Auswahlfelder
+- Tastenkürzel (Strg+S …), Enter, Esc, Entf und F-Tasten als eigene Schritte
+- Screenshot mit rotem Kreis pro Klick, optional mit Zoom-Ausschnitt
+- Editor: Schritte löschen, verschieben und beschriften, Abschnitte, Hinweise/Tipps/Warnungen,
+  Titel, Einleitung und Abschluss
+- Schutz sensibler Eingaben (siehe [Datenschutz](#datenschutz))
+
+## Installation
+**Exe:** Die fertige `ProcessRecorder.exe` gibt es unter
+[Releases](../../releases). Sie benötigt keine Installation.
+
+Beim ersten Start fragt Windows SmartScreen eventuell nach („Weitere Informationen“ →
+„Trotzdem ausführen“). Das Programm läuft mit Administratorrechten (UAC-Abfrage), damit auch
+Klicks in Admin-Fenstern wie Installern erfasst werden. Da es Tastatur und Maus mitliest, können
+Virenscanner Fehlalarme melden. Den gesamten Quelltext findest du in diesem Repository.
+
+**Aus dem Quelltext** (Python 3.12 empfohlen):
+```
+python -m pip install -r requirements.txt
+python main.py
+```
 
 ## Bedienung
-1. Bildschirm wählen, **Start** klicken (Fenster am besten auf einen anderen Monitor schieben).
-2. Ablauf durchführen. Jeder Schritt wird als kurze Handlungsanweisung formuliert, z. B.
-   „Klicken Sie auf die Schaltfläche „Speichern“.“ oder „Geben Sie in das Eingabefeld „Name“
-   folgenden Text ein: „Max“ und klicken Sie auf die Schaltfläche „OK“.“ Klick ins Feld, Tippen und
-   der abschließende Klick bzw. Enter werden zu einem Schritt zusammengefasst; Kontrollkästchen,
-   Optionsfelder, Registerkarten, Menüs und Auswahlfelder haben eigene Formulierungen, ein
-   Programmwechsel wird vermerkt. Tastenkürzel (Strg+S …), Enter, Esc, Entf und F-Tasten sind
-   eigene Schritte. Jeder Klick-Schritt bekommt einen Screenshot mit rotem Kreis.
-3. **Aufnahme beenden** klicken. In der Vorschau lassen sich Schritte löschen, verschieben und
-   beschriften, Abschnitte beginnen, Hinweise/Tipps/Warnungen zu Schritten ergänzen sowie Titel,
-   Einleitung und Abschluss setzen. Danach Speicherort und Format (Word oder PDF) wählen.
+1. Bildschirm wählen und **Start** klicken. Das Programmfenster am besten auf einen anderen
+   Monitor schieben.
+2. Den Ablauf durchführen.
+3. **Aufnahme beenden** klicken, die Schritte in der Vorschau bearbeiten und als Word oder PDF speichern.
 
-Tastenkürzel (global): **Strg+Alt+R** Start/Ende, **Strg+Alt+P** Pause/Fortsetzen. Die Option
-„Zoom-Ausschnitt um jeden Klick einfügen“ ergänzt unter dem Screenshot einen Zoom-Ausschnitt.
+Globale Tastenkürzel: **Strg+Alt+R** Start/Ende, **Strg+Alt+P** Pause/Fortsetzen.
 
-## Entwicklung
-`python -m pip install -r requirements.txt pytest` und `python -m pytest` (Tests in `tests/`).
-Protokolldatei der App: `%APPDATA%\ProcessRecorder\log.txt`.
+## Datenschutz
+Nichts verlässt deinen Rechner. Es gibt keine Netzwerkzugriffe, Anleitungen werden nur lokal gespeichert.
 
-## Sicherheits-Filter (nur Windows)
-Keine Aufzeichnung von Text/Screenshots bei: UAC-Abfrage (sicherer Desktop, consent.exe),
-Anmeldedialogen (credwiz, LogonUI), fokussierten Passwortfeldern (Win32 `ES_PASSWORD`
-sowie UI Automation für Browser/WPF/UWP). Zeichen der letzten 0,6 s vor Erkennung werden
-verworfen. Im Dokument erscheint ein Hinweis-Schritt; danach läuft die Aufnahme automatisch weiter (auch wenn danach ein Programm mit Adminrechten, z. B. ein Installer, im Vordergrund läuft).
+Bei folgenden Situationen werden weder Text noch Screenshots aufgezeichnet:
+- UAC-Abfragen (sicherer Desktop)
+- Anmeldedialoge (credwiz, LogonUI)
+- fokussierte Passwortfelder (Win32 `ES_PASSWORD` sowie UI Automation für Browser, WPF und UWP)
 
-Hinweis: Die exe startet mit Administratorrechten (UAC-Abfrage beim Start). Nur so kann Windows Klicks und Eingaben in Admin-Fenstern (z. B. Installern) an den Recorder melden.
+Zeichen der letzten 0,6 s vor der Erkennung werden verworfen. Im Dokument erscheint stattdessen
+ein Hinweis-Schritt, danach läuft die Aufnahme automatisch weiter.
+
+Die Screenshots zeigen alles, was auf dem Monitor zu sehen ist. Prüfe Anleitungen vor dem
+Weitergeben auf private Inhalte.
 
 ## Grenzen
-- Strg-Kombinationen (z. B. Einfügen mit Strg+V) werden als Tastenkombination-Schritt erfasst,
-  nicht als Text; der eingefügte Inhalt selbst wird nicht aufgezeichnet.
-- Passwortfelder in Browsern werden nur erkannt, wenn diese Barrierefreiheit/UIA bereitstellen.
-- Auf Nicht-Windows-Systemen ist der Schutz inaktiv.
-- Der Screenshot entsteht kurz nach dem Klick; ein dadurch geöffnetes Menü kann bereits sichtbar sein.
+- Strg-Kombinationen (z. B. Strg+V) werden als Tastenkombination erfasst, der eingefügte Inhalt nicht.
+- Passwortfelder in Browsern werden nur erkannt, wenn diese Barrierefreiheit (UIA) bereitstellen.
+- Der Schutz funktioniert nur unter Windows.
+- Der Screenshot entsteht kurz nach dem Klick, ein dadurch geöffnetes Menü kann schon sichtbar sein.
 
-## Exe signieren (optional)
-Der Build signiert `ProcessRecorder.exe` automatisch, sobald im GitHub-Repo (Settings > Secrets and variables > Actions) zwei Secrets existieren:
-- `WINDOWS_CERT_PFX_BASE64`: das Code-Signing-Zertifikat als PFX, base64-kodiert (PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.pfx"))`)
-- `WINDOWS_CERT_PASSWORD`: das PFX-Passwort
+## Entwicklung
+```
+python -m pip install -r requirements.txt pytest
+python -m pytest
+```
+Protokolldatei der App: `%APPDATA%\ProcessRecorder\log.txt`
 
-Ohne Secrets wird der Schritt übersprungen und die exe bleibt unsigniert. Die Signatur enthält einen RFC-3161-Zeitstempel (DigiCert). Ein Zertifikat muss bei einer Zertifizierungsstelle gekauft werden (OV/EV); SmartScreen-Warnungen verschwinden bei OV erst nach und nach, bei EV sofort.
+Beiträge sind willkommen. Öffne gern ein Issue oder einen Pull Request.
+
+## Lizenz
+[MIT](LICENSE)
